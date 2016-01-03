@@ -127,7 +127,7 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 	}
 
 	// Should flush at least once
-	time.Sleep(3 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	err = p.Close()
 	if err != nil {
@@ -136,6 +136,86 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 
 	if p.flushes == 0 {
 		t.Errorf("expected at least 1 flush; got: %d", p.flushes)
+	}
+	if got, want := beforeRequests, int64(numDocs); got != want {
+		t.Errorf("expected %d requests to before callback; got: %d", want, got)
+	}
+	if befores == 0 {
+		t.Error("expected at least 1 call to before callback")
+	}
+	if afters == 0 {
+		t.Error("expected at least 1 call to after callback")
+	}
+	if failures != 0 {
+		t.Errorf("expected 0 calls to failure callback; got: %d", failures)
+	}
+
+	// Check number of documents that were bulk indexed
+	_, err = p.c.Flush(testIndexName).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := p.c.Count(testIndexName).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != int64(numDocs) {
+		t.Fatalf("expected %d documents; got: %d", numDocs, count)
+	}
+}
+
+func TestBulkProcessorFlushOnClose(t *testing.T) {
+	//client := setupTestClientAndCreateIndexAndLog(t, SetTraceLog(log.New(os.Stdout, "", 0)))
+	client := setupTestClientAndCreateIndex(t)
+
+	var beforeRequests int64
+	var befores int64
+	var afters int64
+	var failures int64
+
+	beforeCallback := func(executionId int64, requests []BulkableRequest) {
+		atomic.AddInt64(&beforeRequests, int64(len(requests)))
+		atomic.AddInt64(&befores, 1)
+	}
+	afterCallback := func(executionId int64, response *BulkResponse) {
+		atomic.AddInt64(&afters, 1)
+	}
+	failureCallback := func(executionId int64, response *BulkResponse, err error) {
+		atomic.AddInt64(&failures, 1)
+	}
+
+	p := NewBulkProcessor(client).
+		Name("FlushInterval-1").
+		Workers(2).
+		BulkActions(-1).
+		BulkByteSize(-1).
+		FlushInterval(30 * time.Second). // 30 seconds to flush
+		Before(beforeCallback).After(afterCallback).Failure(failureCallback)
+
+	err := p.Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const numDocs = 1000 // low-enough number that flush should be invoked
+
+	for i := 1; i <= numDocs; i++ {
+		tweet := tweet{User: "olivere", Message: fmt.Sprintf("%d. %s", i, randomString(rand.Intn(64)))}
+		request := NewBulkIndexRequest().Index(testIndexName).Type("tweet").Id(fmt.Sprintf("%d", i)).Doc(tweet)
+		p.Add(request)
+	}
+
+	// Should not flush because 30s > 1s
+	time.Sleep(1 * time.Second)
+
+	// Close should flush
+	err = p.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if p.flushes != 0 {
+		t.Errorf("expected no flushes; got: %d", p.flushes)
 	}
 	if got, want := beforeRequests, int64(numDocs); got != want {
 		t.Errorf("expected %d requests to before callback; got: %d", want, got)
