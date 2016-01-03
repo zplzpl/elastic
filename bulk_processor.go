@@ -32,13 +32,14 @@ type BulkProcessor struct {
 
 	wg sync.WaitGroup
 
-	mu          sync.Mutex // guard the following block
-	closed      bool
-	closeCh     chan bool
-	requestCh   chan BulkableRequest
-	ticker      *time.Ticker
-	executionId int64
-	flushes     int64 // number of times the flush interval has been invoked
+	mu            sync.Mutex // guard the following block
+	closed        bool
+	closeCh       chan bool
+	flushCh       chan bool
+	flusherStopCh chan bool
+	requestCh     chan BulkableRequest
+	executionId   int64
+	flushes       int64 // number of times the flush interval has been invoked
 }
 
 // NewBulkProcessor creates a new BulkProcessor.
@@ -123,22 +124,20 @@ func (p *BulkProcessor) Do() error {
 	}
 
 	p.closeCh = make(chan bool, p.numWorkers)
+	p.flushCh = make(chan bool, p.numWorkers)
 	p.requestCh = make(chan BulkableRequest)
 	p.executionId = 0
-
-	// Start the ticker for flush
-	if int64(p.flushInterval) > 0 {
-		p.ticker = time.NewTicker(p.flushInterval)
-	} else {
-		// TODO Is this the correct way to initialize a ticker that never ticks?
-		p.ticker = time.NewTicker(1 * time.Second)
-		p.ticker.Stop()
-	}
 
 	// Start up workers.
 	for i := 0; i < p.numWorkers; i++ {
 		p.wg.Add(1)
 		go p.worker(i, NewBulkService(p.c))
+	}
+
+	// Start the ticker for flush (if enabled)
+	if int64(p.flushInterval) > 0 {
+		p.flusherStopCh = make(chan bool)
+		go p.flusher(p.flushInterval)
 	}
 
 	p.closed = false
@@ -156,14 +155,19 @@ func (p *BulkProcessor) Close() error {
 		return nil
 	}
 
+	// Stop flusher (if enabled)
+	if p.flusherStopCh != nil {
+		p.flusherStopCh <- true
+		<-p.flusherStopCh
+		close(p.flusherStopCh)
+		p.flusherStopCh = nil
+	}
+
 	// Stop all workers.
 	for i := 0; i < p.numWorkers; i++ {
 		p.closeCh <- true
 	}
 	p.wg.Wait()
-
-	// Stop the periodic flush.
-	p.ticker.Stop()
 
 	// Close all channels.
 	close(p.closeCh)
@@ -172,6 +176,29 @@ func (p *BulkProcessor) Close() error {
 	p.closed = true
 
 	return nil
+}
+
+// flusher is a single goroutine that periodically asks all workers to
+// commit their outstanding bulk requests. It is only started if
+// FlushInterval is greater than 0.
+func (p *BulkProcessor) flusher(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			// Periodic flush
+			atomic.AddInt64(&p.flushes, 1)
+			for i := 0; i < p.numWorkers; i++ {
+				p.flushCh <- true
+			}
+
+		case <-p.flusherStopCh:
+			p.flusherStopCh <- true
+			return
+		}
+	}
 }
 
 // Add adds a single request to commit by the BulkProcessor.
@@ -198,41 +225,34 @@ func (p *BulkProcessor) executeRequired(service *BulkService) bool {
 func (p *BulkProcessor) worker(i int, service *BulkService) {
 	defer p.wg.Done()
 
+	commit := func() error {
+		id := atomic.AddInt64(&p.executionId, 1)
+		err := p.execute(id, service)
+		if err != nil {
+			p.c.errorf("elastic: BulkProcessor %q failed: %v", p.name, err)
+		}
+		return err
+	}
+
 	for {
 		select {
 		case req := <-p.requestCh:
 			// Received a new request
 			service.Add(req)
 			if p.executeRequired(service) {
-				id := atomic.AddInt64(&p.executionId, 1)
-				err := p.execute(id, service)
-				if err != nil {
-					// TODO swallow errors here?
-					p.c.errorf("elastic: BulkProcessor %q failed: %v", p.name, err)
-				}
+				commit() // TODO swallow errors here?
 			}
 
-		case <-p.ticker.C:
+		case <-p.flushCh:
 			// Periodic flush
 			if service.NumberOfActions() > 0 {
-				atomic.AddInt64(&p.flushes, 1)
-				id := atomic.AddInt64(&p.executionId, 1)
-				err := p.execute(id, service)
-				if err != nil {
-					// TODO swallow errors here?
-					p.c.errorf("elastic: BulkProcessor %q failed: %v", p.name, err)
-				}
+				commit() // TODO swallow errors here?
 			}
 
 		case <-p.closeCh:
 			// Commit last batch before workers stops
 			if service.NumberOfActions() > 0 {
-				id := atomic.AddInt64(&p.executionId, 1)
-				err := p.execute(id, service)
-				if err != nil {
-					// TODO swallow errors here?
-					p.c.errorf("elastic: BulkProcessor %q failed: %v", p.name, err)
-				}
+				commit() // TODO swallow errors here?
 			}
 			return
 		}
