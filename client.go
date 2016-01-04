@@ -906,7 +906,14 @@ func (c *Client) next() (*conn, error) {
 		}
 	}
 
-	// TODO(oe) As a last resort, we could try to awake a dead connection here.
+	// We only have dead connections now. However, the node may have come
+	// back and if we don't sniff, we need to awake connections so that the
+	// cluster will eventually become available again.
+	if !c.snifferEnabled {
+		for _, conn := range c.conns {
+			conn.MarkAsAlive()
+		}
+	}
 
 	// We tried hard, but there is no node available
 	return nil, ErrNoClient

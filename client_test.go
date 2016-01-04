@@ -187,6 +187,41 @@ func TestClientSniffDisabled(t *testing.T) {
 	}
 }
 
+func TestClientWillMarkConnectionsAsAliveWhenAllAreDead(t *testing.T) {
+	client, err := NewClient(SetURL("http://127.0.0.1:9201"),
+		SetSniff(false), SetHealthcheck(false), SetMaxRetries(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// We should have a connection.
+	if len(client.conns) != 1 {
+		t.Fatalf("expected 1 node, got: %d (%v)", len(client.conns), client.conns)
+	}
+
+	// Make a request, so that the connections is marked as dead.
+	client.Flush().Do()
+
+	// The connection should now be marked as dead.
+	if i, found := findConn("http://127.0.0.1:9201", client.conns...); !found {
+		t.Fatalf("expected connection to %q to be found", "http://127.0.0.1:9201")
+	} else {
+		if conn := client.conns[i]; !conn.IsDead() {
+			t.Fatalf("expected connection to be dead, got: %v", conn)
+		}
+	}
+
+	// Now send another request and the connection should be marked as alive again.
+	client.Flush().Do()
+
+	if i, found := findConn("http://127.0.0.1:9201", client.conns...); !found {
+		t.Fatalf("expected connection to %q to be found", "http://127.0.0.1:9201")
+	} else {
+		if conn := client.conns[i]; conn.IsDead() {
+			t.Fatalf("expected connection to be alive, got: %v", conn)
+		}
+	}
+}
+
 func TestClientWithRequiredPlugins(t *testing.T) {
 	_, err := NewClient(SetRequiredPlugins("no-such-plugin"))
 	if err == nil {
