@@ -906,10 +906,12 @@ func (c *Client) next() (*conn, error) {
 		}
 	}
 
-	// We only have dead connections now. However, the node may have come
-	// back and if we don't sniff, we need to awake connections so that the
-	// cluster will eventually become available again.
+	// We have a deadlock here: All nodes are marked as dead.
+	// If sniffing is disabled, connections will never be marked alive again.
+	// So we are marking them as alive--if sniffing is disabled.
+	// They'll then be picked up in the next call to PerformRequest.
 	if !c.snifferEnabled {
+		c.errorf("elastic: all %d nodes marked as dead; resurrecting them to prevent deadlock", len(c.conns))
 		for _, conn := range c.conns {
 			conn.MarkAsAlive()
 		}
