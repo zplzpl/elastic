@@ -521,7 +521,8 @@ func TestClientSelectConnAllDead(t *testing.T) {
 	client.conns[0].MarkAsDead()
 	client.conns[1].MarkAsDead()
 
-	// #1: Return ErrNoClient
+	// If all connections are dead, next should make them alive again, but
+	// still return ErrNoClient when it first finds out.
 	c, err := client.next()
 	if err != ErrNoClient {
 		t.Fatal(err)
@@ -529,21 +530,21 @@ func TestClientSelectConnAllDead(t *testing.T) {
 	if c != nil {
 		t.Fatalf("expected no connection; got: %v", c)
 	}
-	// #2: Return ErrNoClient again
+	// Return a connection
 	c, err = client.next()
-	if err != ErrNoClient {
-		t.Fatal(err)
+	if err != nil {
+		t.Fatalf("expected no error; got: %v", err)
 	}
-	if c != nil {
-		t.Fatalf("expected no connection; got: %v", c)
+	if c == nil {
+		t.Fatalf("expected connection; got: %v", c)
 	}
-	// #3: Return ErrNoClient again and again
+	// Return a connection
 	c, err = client.next()
-	if err != ErrNoClient {
-		t.Fatal(err)
+	if err != nil {
+		t.Fatalf("expected no error; got: %v", err)
 	}
-	if c != nil {
-		t.Fatalf("expected no connection; got: %v", c)
+	if c == nil {
+		t.Fatalf("expected connection; got: %v", c)
 	}
 }
 
