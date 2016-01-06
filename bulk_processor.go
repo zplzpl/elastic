@@ -32,14 +32,15 @@ type BulkProcessor struct {
 
 	wg sync.WaitGroup
 
-	mu            sync.Mutex // guard the following block
-	closed        bool
-	closeCh       chan struct{}
+	workerStopCh  chan struct{}
 	flushCh       chan struct{}
 	flusherStopCh chan struct{}
 	requestCh     chan BulkableRequest
 	executionId   int64
 	flushes       int64 // number of times the flush interval has been invoked
+
+	mu     sync.Mutex // guard the following block
+	closed bool
 }
 
 // NewBulkProcessor creates a new BulkProcessor.
@@ -123,7 +124,7 @@ func (p *BulkProcessor) Do() error {
 		p.numWorkers = 1
 	}
 
-	p.closeCh = make(chan struct{}, p.numWorkers)
+	p.workerStopCh = make(chan struct{}, p.numWorkers)
 	p.flushCh = make(chan struct{}, p.numWorkers)
 	p.requestCh = make(chan BulkableRequest)
 	p.executionId = 0
@@ -165,12 +166,12 @@ func (p *BulkProcessor) Close() error {
 
 	// Stop all workers.
 	for i := 0; i < p.numWorkers; i++ {
-		p.closeCh <- struct{}{}
+		p.workerStopCh <- struct{}{}
 	}
 	p.wg.Wait()
 
 	// Close all channels.
-	close(p.closeCh)
+	close(p.workerStopCh)
 	close(p.requestCh)
 
 	p.closed = true
@@ -249,7 +250,7 @@ func (p *BulkProcessor) worker(i int, service *BulkService) {
 				commit() // TODO swallow errors here?
 			}
 
-		case <-p.closeCh:
+		case <-p.workerStopCh:
 			// Commit last batch before workers stops
 			if service.NumberOfActions() > 0 {
 				commit() // TODO swallow errors here?
