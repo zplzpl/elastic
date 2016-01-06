@@ -29,18 +29,31 @@ type BulkProcessor struct {
 	bulkActions   int
 	bulkByteSize  int
 	flushInterval time.Duration
+	wantStats     bool
 
-	wg sync.WaitGroup
-
+	workerWg      sync.WaitGroup
 	workerStopCh  chan struct{}
 	flushCh       chan struct{}
 	flusherStopCh chan struct{}
 	requestCh     chan BulkableRequest
 	executionId   int64
-	flushes       int64 // number of times the flush interval has been invoked
+	running       bool
 
-	mu     sync.Mutex // guard the following block
-	closed bool
+	statsMu sync.Mutex // guard the following block
+	stats   *BulkProcessorStats
+}
+
+// BulkProcessorStats contains various statistics of a bulk processor
+// while it is running. Use the Stats func to return it while running.
+type BulkProcessorStats struct {
+	Flushed   int64 // number of times the flush interval has been invoked
+	Committed int64 // # of times workers committed bulk requests
+	Indexed   int64 // # of requests indexed
+	Created   int64 // # of requests that were reported as created
+	Updated   int64 // # of requests that were reported as updated
+	Deleted   int64 // # of requests that were reported as deleted
+	Succeeded int64 // # of requests that were reported as successful
+	Failed    int64 // # of requests that were reported as failed
 }
 
 // NewBulkProcessor creates a new BulkProcessor.
@@ -50,7 +63,6 @@ func NewBulkProcessor(client *Client) *BulkProcessor {
 		numWorkers:   1,
 		bulkActions:  1000,
 		bulkByteSize: 5 << 20, // 5 MB
-		closed:       true,
 	}
 }
 
@@ -114,10 +126,26 @@ func (p *BulkProcessor) FlushInterval(interval time.Duration) *BulkProcessor {
 	return p
 }
 
+// CollectStats tells bulk processor to gather stats while running.
+// Use Stats to return the stats.
+func (p *BulkProcessor) CollectStats(enable bool) *BulkProcessor {
+	p.wantStats = enable
+	return p
+}
+
+// Stats returns the latest bulk processor statistics.
+// The caller must enable this on the bulk processor by CollectStats(true).
+func (p *BulkProcessor) Stats() BulkProcessorStats {
+	p.statsMu.Lock()
+	defer p.statsMu.Unlock()
+	return *p.stats
+}
+
 // Do starts the bulk processor. Use Close to stop it.
 func (p *BulkProcessor) Do() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	if p.running {
+		return nil
+	}
 
 	// We must have at least one worker.
 	if p.numWorkers < 1 {
@@ -128,10 +156,11 @@ func (p *BulkProcessor) Do() error {
 	p.flushCh = make(chan struct{}, p.numWorkers)
 	p.requestCh = make(chan BulkableRequest)
 	p.executionId = 0
+	p.stats = &BulkProcessorStats{}
 
 	// Start up workers.
 	for i := 0; i < p.numWorkers; i++ {
-		p.wg.Add(1)
+		p.workerWg.Add(1)
 		go p.worker(i, NewBulkService(p.c))
 	}
 
@@ -141,18 +170,15 @@ func (p *BulkProcessor) Do() error {
 		go p.flusher(p.flushInterval)
 	}
 
-	p.closed = false
+	p.running = true
 
 	return nil
 }
 
 // Close stops the bulk processor. If it is already stopped, this is a no-op.
 func (p *BulkProcessor) Close() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	// Already closed: Do nothing.
-	if p.closed {
+	// Already stopped? Do nothing.
+	if !p.running {
 		return nil
 	}
 
@@ -168,13 +194,13 @@ func (p *BulkProcessor) Close() error {
 	for i := 0; i < p.numWorkers; i++ {
 		p.workerStopCh <- struct{}{}
 	}
-	p.wg.Wait()
+	p.workerWg.Wait()
 
 	// Close all channels.
 	close(p.workerStopCh)
 	close(p.requestCh)
 
-	p.closed = true
+	p.running = false
 
 	return nil
 }
@@ -190,7 +216,9 @@ func (p *BulkProcessor) flusher(interval time.Duration) {
 		select {
 		case <-ticker.C:
 			// Periodic flush
-			atomic.AddInt64(&p.flushes, 1)
+			p.statsMu.Lock()
+			p.stats.Flushed += 1
+			p.statsMu.Unlock()
 			for i := 0; i < p.numWorkers; i++ {
 				p.flushCh <- struct{}{}
 			}
@@ -203,7 +231,6 @@ func (p *BulkProcessor) flusher(interval time.Duration) {
 }
 
 // Add adds a single request to commit by the BulkProcessor.
-// This operation is asynchronous.
 func (p *BulkProcessor) Add(request BulkableRequest) {
 	p.requestCh <- request
 }
@@ -224,7 +251,7 @@ func (p *BulkProcessor) executeRequired(service *BulkService) bool {
 
 // worker is a single goroutine handling and committing bulk requests.
 func (p *BulkProcessor) worker(i int, service *BulkService) {
-	defer p.wg.Done()
+	defer p.workerWg.Done()
 
 	commit := func() error {
 		id := atomic.AddInt64(&p.executionId, 1)
@@ -277,6 +304,19 @@ func (p *BulkProcessor) execute(id int64, service *BulkService) error {
 		}
 		return err
 	}
+
+	// Update stats
+	p.statsMu.Lock()
+	if p.wantStats {
+		p.stats.Committed += 1
+		p.stats.Indexed += int64(len(res.Indexed()))
+		p.stats.Created += int64(len(res.Created()))
+		p.stats.Updated += int64(len(res.Updated()))
+		p.stats.Deleted += int64(len(res.Deleted()))
+		p.stats.Succeeded += int64(len(res.Succeeded()))
+		p.stats.Failed += int64(len(res.Failed()))
+	}
+	p.statsMu.Unlock()
 
 	// Invoke after callback
 	if p.afterFn != nil {

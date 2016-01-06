@@ -19,23 +19,26 @@ func TestBulkProcessorDefaults(t *testing.T) {
 	if p == nil {
 		t.Fatalf("expected BulkProcessor; got: %v", p)
 	}
-	if got, want := p.closed, true; got != want {
-		t.Fatalf("expected %v; got: %v", want, got)
+	if got, want := p.running, false; got != want {
+		t.Errorf("expected %v; got: %v", want, got)
 	}
 	if got, want := p.name, ""; got != want {
-		t.Fatalf("expected %q; got: %q", want, got)
+		t.Errorf("expected %q; got: %q", want, got)
 	}
 	if got, want := p.numWorkers, 1; got != want {
-		t.Fatalf("expected %d; got: %d", want, got)
+		t.Errorf("expected %d; got: %d", want, got)
 	}
 	if got, want := p.bulkActions, 1000; got != want {
-		t.Fatalf("expected %d; got: %d", want, got)
+		t.Errorf("expected %d; got: %d", want, got)
 	}
 	if got, want := p.bulkByteSize, 5*1024*1024; got != want {
-		t.Fatalf("expected %d; got: %d", want, got)
+		t.Errorf("expected %d; got: %d", want, got)
 	}
 	if got, want := p.flushInterval, time.Duration(0); got != want {
-		t.Fatalf("expected %v; got: %v", want, got)
+		t.Errorf("expected %v; got: %v", want, got)
+	}
+	if got, want := p.wantStats, false; got != want {
+		t.Errorf("expected %v; got: %v", want, got)
 	}
 }
 
@@ -134,8 +137,8 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if p.flushes == 0 {
-		t.Errorf("expected at least 1 flush; got: %d", p.flushes)
+	if p.stats.Flushed == 0 {
+		t.Errorf("expected at least 1 flush; got: %d", p.stats.Flushed)
 	}
 	if got, want := beforeRequests, int64(numDocs); got != want {
 		t.Errorf("expected %d requests to before callback; got: %d", want, got)
@@ -214,8 +217,8 @@ func TestBulkProcessorFlushOnClose(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if p.flushes != 0 {
-		t.Errorf("expected no flushes; got: %d", p.flushes)
+	if p.stats.Flushed != 0 {
+		t.Errorf("expected no flush; got: %d", p.stats.Flushed)
 	}
 	if got, want := beforeRequests, int64(numDocs); got != want {
 		t.Errorf("expected %d requests to before callback; got: %d", want, got)
@@ -263,7 +266,11 @@ func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessor) {
 		atomic.AddInt64(&failures, 1)
 	}
 
-	err := p.Before(beforeCallback).After(afterCallback).Failure(failureCallback).Do()
+	err := p.CollectStats(true).
+		Before(beforeCallback).
+		After(afterCallback).
+		Failure(failureCallback).
+		Do()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,6 +279,8 @@ func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessor) {
 		tweet := tweet{User: "olivere", Message: fmt.Sprintf("%d. %s", i, randomString(rand.Intn(64)))}
 		request := NewBulkIndexRequest().Index(testIndexName).Type("tweet").Id(fmt.Sprintf("%d", i)).Doc(tweet)
 		p.Add(request)
+
+		_ = p.Stats()
 	}
 
 	err = p.Close()
@@ -279,8 +288,31 @@ func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessor) {
 		t.Fatal(err)
 	}
 
-	if p.flushes != 0 {
-		t.Errorf("expected no flush; got: %d", p.flushes)
+	stats := p.Stats()
+
+	if stats.Flushed != 0 {
+		t.Errorf("expected no flush; got: %d", stats.Flushed)
+	}
+	if stats.Committed <= 0 {
+		t.Errorf("expected committed > %d; got: %d", 0, stats.Committed)
+	}
+	if got, want := stats.Indexed, int64(numDocs); got != want {
+		t.Errorf("expected indexed = %d; got: %d", want, got)
+	}
+	if got, want := stats.Created, int64(0); got != want {
+		t.Errorf("expected created = %d; got: %d", want, got)
+	}
+	if got, want := stats.Updated, int64(0); got != want {
+		t.Errorf("expected updated = %d; got: %d", want, got)
+	}
+	if got, want := stats.Deleted, int64(0); got != want {
+		t.Errorf("expected deleted = %d; got: %d", want, got)
+	}
+	if got, want := stats.Succeeded, int64(numDocs); got != want {
+		t.Errorf("expected succeeded = %d; got: %d", want, got)
+	}
+	if got, want := stats.Failed, int64(0); got != want {
+		t.Errorf("expected failed = %d; got: %d", want, got)
 	}
 	if got, want := beforeRequests, int64(numDocs); got != want {
 		t.Errorf("expected %d requests to before callback; got: %d", want, got)
