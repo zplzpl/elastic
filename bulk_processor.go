@@ -34,9 +34,9 @@ type BulkProcessor struct {
 
 	mu            sync.Mutex // guard the following block
 	closed        bool
-	closeCh       chan bool
-	flushCh       chan bool
-	flusherStopCh chan bool
+	closeCh       chan struct{}
+	flushCh       chan struct{}
+	flusherStopCh chan struct{}
 	requestCh     chan BulkableRequest
 	executionId   int64
 	flushes       int64 // number of times the flush interval has been invoked
@@ -123,8 +123,8 @@ func (p *BulkProcessor) Do() error {
 		p.numWorkers = 1
 	}
 
-	p.closeCh = make(chan bool, p.numWorkers)
-	p.flushCh = make(chan bool, p.numWorkers)
+	p.closeCh = make(chan struct{}, p.numWorkers)
+	p.flushCh = make(chan struct{}, p.numWorkers)
 	p.requestCh = make(chan BulkableRequest)
 	p.executionId = 0
 
@@ -136,7 +136,7 @@ func (p *BulkProcessor) Do() error {
 
 	// Start the ticker for flush (if enabled)
 	if int64(p.flushInterval) > 0 {
-		p.flusherStopCh = make(chan bool)
+		p.flusherStopCh = make(chan struct{})
 		go p.flusher(p.flushInterval)
 	}
 
@@ -157,7 +157,7 @@ func (p *BulkProcessor) Close() error {
 
 	// Stop flusher (if enabled)
 	if p.flusherStopCh != nil {
-		p.flusherStopCh <- true
+		p.flusherStopCh <- struct{}{}
 		<-p.flusherStopCh
 		close(p.flusherStopCh)
 		p.flusherStopCh = nil
@@ -165,7 +165,7 @@ func (p *BulkProcessor) Close() error {
 
 	// Stop all workers.
 	for i := 0; i < p.numWorkers; i++ {
-		p.closeCh <- true
+		p.closeCh <- struct{}{}
 	}
 	p.wg.Wait()
 
@@ -191,11 +191,11 @@ func (p *BulkProcessor) flusher(interval time.Duration) {
 			// Periodic flush
 			atomic.AddInt64(&p.flushes, 1)
 			for i := 0; i < p.numWorkers; i++ {
-				p.flushCh <- true
+				p.flushCh <- struct{}{}
 			}
 
 		case <-p.flusherStopCh:
-			p.flusherStopCh <- true
+			p.flusherStopCh <- struct{}{}
 			return
 		}
 	}
