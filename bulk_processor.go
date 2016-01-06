@@ -24,23 +24,22 @@ type BulkProcessor struct {
 	beforeFn      BulkBeforeFunc
 	afterFn       BulkAfterFunc
 	failureFn     BulkFailureFunc
-	name          string
-	numWorkers    int
-	bulkActions   int
-	bulkByteSize  int
-	flushInterval time.Duration
-	wantStats     bool
+	name          string        // name of processor
+	numWorkers    int           // # of workers (>= 1)
+	bulkActions   int           // # of requests after which to commit
+	bulkByteSize  int           // # of bytes after which to commit
+	flushInterval time.Duration // periodic flush interval
+	wantStats     bool          // indicates whether to gather statistics
 
-	workerWg      sync.WaitGroup
-	workerStopCh  chan struct{}
-	flushCh       chan struct{}
-	flusherStopCh chan struct{}
-	requestCh     chan BulkableRequest
-	executionId   int64
-	running       bool
+	workerWg      sync.WaitGroup       // used to stop workers
+	requestCh     chan BulkableRequest // for adding requests
+	flushCh       chan struct{}        // for asking the workers to flush
+	flusherStopCh chan struct{}        // stop channel for flusher
+	executionId   int64                // unique id for bulk commits
+	running       bool                 // indicates whether the processor is running
 
-	statsMu sync.Mutex // guard the following block
-	stats   *BulkProcessorStats
+	statsMu sync.Mutex          // guard the following variables
+	stats   *BulkProcessorStats // current stats
 }
 
 // BulkProcessorStats contains various statistics of a bulk processor
@@ -49,11 +48,11 @@ type BulkProcessorStats struct {
 	Flushed   int64 // number of times the flush interval has been invoked
 	Committed int64 // # of times workers committed bulk requests
 	Indexed   int64 // # of requests indexed
-	Created   int64 // # of requests that were reported as created
-	Updated   int64 // # of requests that were reported as updated
-	Deleted   int64 // # of requests that were reported as deleted
-	Succeeded int64 // # of requests that were reported as successful
-	Failed    int64 // # of requests that were reported as failed
+	Created   int64 // # of requests that ES reported as creates (201)
+	Updated   int64 // # of requests that ES reported as updates
+	Deleted   int64 // # of requests that ES reported as deletes
+	Succeeded int64 // # of requests that ES reported as successful
+	Failed    int64 // # of requests that ES reported as failed
 }
 
 // NewBulkProcessor creates a new BulkProcessor.
@@ -66,25 +65,36 @@ func NewBulkProcessor(client *Client) *BulkProcessor {
 	}
 }
 
+// BulkBeforeFunc defines the signature of callbacks that are executed
+// before a commit to Elasticsearch.
 type BulkBeforeFunc func(executionId int64, requests []BulkableRequest)
+
+// BulkBeforeFunc defines the signature of callbacks that are executed
+// after a commit to Elasticsearch, regardless of being successful or not.
 type BulkAfterFunc func(executionId int64, response *BulkResponse)
+
+// BulkFailureFunc defines the signature of callbacks that are executed
+// when Elasticsearch reports an error.
 type BulkFailureFunc func(executionId int64, response *BulkResponse, err error)
 
-// Before specifies a function to be executed before bulk requests get executed.
+// Before specifies a function to be executed before bulk requests get comitted
+// to Elasticsearch.
 func (p *BulkProcessor) Before(fn BulkBeforeFunc) *BulkProcessor {
 	p.beforeFn = fn
 	return p
 }
 
 // After specifies a function to be executed when bulk requests have been
-// successfully executed.
+// comitted to Elasticsearch. The After callback always executes, even when
+// Elasticsearch reported an error (and therefor executes Failure callback).
 func (p *BulkProcessor) After(fn BulkAfterFunc) *BulkProcessor {
 	p.afterFn = fn
 	return p
 }
 
-// Failure specifies a function to be executed when a bulk request failed
-// to be executed successfully.
+// Failure specifies a function to be executed when bulk requests failed
+// to be comitted successfully. The Failure callback is executed before
+// the After callback.
 func (p *BulkProcessor) Failure(fn BulkFailureFunc) *BulkProcessor {
 	p.failureFn = fn
 	return p
@@ -97,7 +107,7 @@ func (p *BulkProcessor) Name(name string) *BulkProcessor {
 }
 
 // Workers is the number of concurrent workers allowed to be
-// executed. Defaults to 1.
+// executed. Defaults to 1 and must be greater or equal to 1.
 func (p *BulkProcessor) Workers(num int) *BulkProcessor {
 	p.numWorkers = num
 	return p
@@ -127,14 +137,14 @@ func (p *BulkProcessor) FlushInterval(interval time.Duration) *BulkProcessor {
 }
 
 // CollectStats tells bulk processor to gather stats while running.
-// Use Stats to return the stats.
+// Use Stats to return the stats. This is disabled by default.
 func (p *BulkProcessor) CollectStats(enable bool) *BulkProcessor {
 	p.wantStats = enable
 	return p
 }
 
 // Stats returns the latest bulk processor statistics.
-// The caller must enable this on the bulk processor by CollectStats(true).
+// Collecting stats must be enabled first by calling CollectStats(true).
 func (p *BulkProcessor) Stats() BulkProcessorStats {
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
@@ -142,6 +152,7 @@ func (p *BulkProcessor) Stats() BulkProcessorStats {
 }
 
 // Do starts the bulk processor. Use Close to stop it.
+// If the processor is already running, this is a no-op and nil is returned.
 func (p *BulkProcessor) Do() error {
 	if p.running {
 		return nil
@@ -152,7 +163,6 @@ func (p *BulkProcessor) Do() error {
 		p.numWorkers = 1
 	}
 
-	p.workerStopCh = make(chan struct{}, p.numWorkers)
 	p.flushCh = make(chan struct{}, p.numWorkers)
 	p.requestCh = make(chan BulkableRequest)
 	p.executionId = 0
@@ -175,7 +185,8 @@ func (p *BulkProcessor) Do() error {
 	return nil
 }
 
-// Close stops the bulk processor. If it is already stopped, this is a no-op.
+// Close stops the bulk processor previously started with Do.
+// If it is already stopped, this is a no-op and nil is returned.
 func (p *BulkProcessor) Close() error {
 	// Already stopped? Do nothing.
 	if !p.running {
@@ -190,18 +201,28 @@ func (p *BulkProcessor) Close() error {
 		p.flusherStopCh = nil
 	}
 
-	// Stop all workers.
-	for i := 0; i < p.numWorkers; i++ {
-		p.workerStopCh <- struct{}{}
-	}
-	p.workerWg.Wait()
-
 	// Close all channels.
-	close(p.workerStopCh)
 	close(p.requestCh)
+	p.workerWg.Wait()
 
 	p.running = false
 
+	return nil
+}
+
+// Add adds a single request to commit by the BulkProcessor.
+func (p *BulkProcessor) Add(request BulkableRequest) {
+	p.requestCh <- request
+}
+
+// Flush manually asks all workers to commit their outstanding requests.
+func (p *BulkProcessor) Flush() error {
+	p.statsMu.Lock()
+	p.stats.Flushed += 1
+	p.statsMu.Unlock()
+	for i := 0; i < p.numWorkers; i++ {
+		p.flushCh <- struct{}{}
+	}
 	return nil
 }
 
@@ -230,11 +251,6 @@ func (p *BulkProcessor) flusher(interval time.Duration) {
 	}
 }
 
-// Add adds a single request to commit by the BulkProcessor.
-func (p *BulkProcessor) Add(request BulkableRequest) {
-	p.requestCh <- request
-}
-
 // executeRequired returns true if the service has to commit its
 // bulk requests. This can be either because the number of actions
 // or the estimated size in bytes is larger than specified in the
@@ -257,32 +273,34 @@ func (p *BulkProcessor) worker(i int, service *BulkService) {
 		id := atomic.AddInt64(&p.executionId, 1)
 		err := p.execute(id, service)
 		if err != nil {
-			p.c.errorf("elastic: BulkProcessor %q failed: %v", p.name, err)
+			p.c.errorf("elastic: bulk processor %q failed: %v", p.name, err)
 		}
 		return err
 	}
 
-	for {
+	var stop bool
+	for !stop {
 		select {
-		case req := <-p.requestCh:
-			// Received a new request
-			service.Add(req)
-			if p.executeRequired(service) {
-				commit() // TODO swallow errors here?
+		case req, open := <-p.requestCh:
+			if open {
+				// Received a new request
+				service.Add(req)
+				if p.executeRequired(service) {
+					commit() // TODO swallow errors here?
+				}
+			} else {
+				// Channel closed: Stop.
+				stop = true
+				if service.NumberOfActions() > 0 {
+					commit() // TODO swallow errors here?
+				}
 			}
 
 		case <-p.flushCh:
-			// Periodic flush
+			// Commit outstanding requests
 			if service.NumberOfActions() > 0 {
 				commit() // TODO swallow errors here?
 			}
-
-		case <-p.workerStopCh:
-			// Commit last batch before workers stops
-			if service.NumberOfActions() > 0 {
-				commit() // TODO swallow errors here?
-			}
-			return
 		}
 	}
 }

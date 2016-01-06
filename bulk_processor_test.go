@@ -247,6 +247,80 @@ func TestBulkProcessorFlushOnClose(t *testing.T) {
 	}
 }
 
+func TestBulkProcessorFlush(t *testing.T) {
+	//client := setupTestClientAndCreateIndexAndLog(t, SetTraceLog(log.New(os.Stdout, "", 0)))
+	client := setupTestClientAndCreateIndex(t)
+
+	p := NewBulkProcessor(client).
+		Name("ManualFlush").
+		Workers(2).
+		BulkActions(-1).
+		BulkByteSize(-1).
+		FlushInterval(30 * time.Second). // 30 seconds to flush
+		CollectStats(true)
+
+	err := p.Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const numDocs = 100
+
+	for i := 1; i <= numDocs; i++ {
+		tweet := tweet{User: "olivere", Message: fmt.Sprintf("%d. %s", i, randomString(rand.Intn(64)))}
+		request := NewBulkIndexRequest().Index(testIndexName).Type("tweet").Id(fmt.Sprintf("%d", i)).Doc(tweet)
+		p.Add(request)
+	}
+
+	// Should not flush because 30s > 1s
+	time.Sleep(1 * time.Second)
+
+	// No flush yet
+	stats := p.Stats()
+	if stats.Flushed != 0 {
+		t.Errorf("expected no flush; got: %d", p.stats.Flushed)
+	}
+
+	// Manual flush
+	err = p.Flush()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	// Now flushed
+	stats = p.Stats()
+	if got, want := p.stats.Flushed, int64(1); got != want {
+		t.Errorf("expected %d flush; got: %d", want, got)
+	}
+
+	// Close should not start another flush
+	err = p.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Still 1 flush
+	stats = p.Stats()
+	if got, want := p.stats.Flushed, int64(1); got != want {
+		t.Errorf("expected %d flush; got: %d", want, got)
+	}
+
+	// Check number of documents that were bulk indexed
+	_, err = p.c.Flush(testIndexName).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := p.c.Count(testIndexName).Do()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != int64(numDocs) {
+		t.Fatalf("expected %d documents; got: %d", numDocs, count)
+	}
+}
+
 // -- Helper --
 
 func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessor) {
