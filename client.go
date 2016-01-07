@@ -1104,6 +1104,11 @@ func (c *Client) Bulk() *BulkService {
 	return NewBulkService(c)
 }
 
+// BulkProcessor allows setting up a concurrent processor of bulk requests.
+func (c *Client) BulkProcessor() *BulkProcessorService {
+	return NewBulkProcessorService(c)
+}
+
 // TODO Term Vectors
 // TODO Multi termvectors API
 

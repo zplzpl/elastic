@@ -15,7 +15,7 @@ import (
 func TestBulkProcessorDefaults(t *testing.T) {
 	client := setupTestClientAndCreateIndex(t)
 
-	p := NewBulkProcessor(client)
+	p := client.BulkProcessor()
 	if p == nil {
 		t.Fatalf("expected BulkProcessor; got: %v", p)
 	}
@@ -48,7 +48,7 @@ func TestBulkProcessorBasedOnBulkActions(t *testing.T) {
 
 	testBulkProcessor(t,
 		10000,
-		NewBulkProcessor(client).
+		client.BulkProcessor().
 			Name("ByteActions-1").
 			Workers(1).
 			BulkActions(100).
@@ -57,7 +57,7 @@ func TestBulkProcessorBasedOnBulkActions(t *testing.T) {
 
 	testBulkProcessor(t,
 		10000,
-		NewBulkProcessor(client).
+		client.BulkProcessor().
 			Name("ByteActions-2").
 			Workers(2).
 			BulkActions(100).
@@ -71,7 +71,7 @@ func TestBulkProcessorBasedOnBulkSizeInBytes(t *testing.T) {
 
 	testBulkProcessor(t,
 		10000,
-		NewBulkProcessor(client).
+		client.BulkProcessor().
 			Name("ByteSize-1").
 			Workers(1).
 			BulkActions(-1).
@@ -80,7 +80,7 @@ func TestBulkProcessorBasedOnBulkSizeInBytes(t *testing.T) {
 
 	testBulkProcessor(t,
 		10000,
-		NewBulkProcessor(client).
+		client.BulkProcessor().
 			Name("ByteSize-2").
 			Workers(2).
 			BulkActions(-1).
@@ -108,7 +108,7 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 		atomic.AddInt64(&failures, 1)
 	}
 
-	p := NewBulkProcessor(client).
+	p := client.BulkProcessor().
 		Name("FlushInterval-1").
 		Workers(2).
 		BulkActions(-1).
@@ -187,7 +187,7 @@ func TestBulkProcessorClose(t *testing.T) {
 		atomic.AddInt64(&failures, 1)
 	}
 
-	p := NewBulkProcessor(client).
+	p := client.BulkProcessor().
 		Name("FlushInterval-1").
 		Workers(2).
 		BulkActions(-1).
@@ -251,7 +251,7 @@ func TestBulkProcessorFlush(t *testing.T) {
 	//client := setupTestClientAndCreateIndexAndLog(t, SetTraceLog(log.New(os.Stdout, "", 0)))
 	client := setupTestClientAndCreateIndex(t)
 
-	p := NewBulkProcessor(client).
+	p := client.BulkProcessor().
 		Name("ManualFlush").
 		Workers(10).
 		BulkActions(-1).
@@ -323,7 +323,7 @@ func TestBulkProcessorFlush(t *testing.T) {
 
 // -- Helper --
 
-func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessor) {
+func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessorService) {
 	var beforeRequests int64
 	var befores int64
 	var afters int64

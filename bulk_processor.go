@@ -10,23 +10,23 @@ import (
 	"time"
 )
 
-// BulkProcessor allows to easily process bulk requests. It allows setting
+// BulkProcessorService allows to easily process bulk requests. It allows setting
 // policies when to flush new bulk requests, e.g. based on a number of actions,
 // on the size of the actions, and/or to flush periodically. It also allows
 // to control the number of concurrent bulk requests allowed to be executed
 // in parallel.
 //
-// BulkProcessor, by default, commits either every 1000 requests or when the
+// BulkProcessorService, by default, commits either every 1000 requests or when the
 // (estimated) size of the bulk requests exceeds 5 MB. However, it does not
 // commit periodically.
 //
 // The caller is responsible for setting the index and type on every
-// bulk request added to BulkProcessor.
+// bulk request added to BulkProcessorService.
 //
-// BulkProcessor takes ideas from the BulkProcessor of the
+// BulkProcessorService takes ideas from the BulkProcessor of the
 // Elasticsearch Java API as documented in
 // https://www.elastic.co/guide/en/elasticsearch/client/java-api/current/java-docs-bulk-processor.html.
-type BulkProcessor struct {
+type BulkProcessorService struct {
 	c             *Client
 	beforeFn      BulkBeforeFunc
 	afterFn       BulkAfterFunc
@@ -62,9 +62,9 @@ type BulkProcessorStats struct {
 	Failed    int64 // # of requests that ES reported as failed
 }
 
-// NewBulkProcessor creates a new BulkProcessor.
-func NewBulkProcessor(client *Client) *BulkProcessor {
-	return &BulkProcessor{
+// NewBulkProcessorService creates a new BulkProcessorService.
+func NewBulkProcessorService(client *Client) *BulkProcessorService {
+	return &BulkProcessorService{
 		c:            client,
 		numWorkers:   1,
 		bulkActions:  1000,
@@ -86,7 +86,7 @@ type BulkFailureFunc func(executionId int64, response *BulkResponse, err error)
 
 // Before specifies a function to be executed before bulk requests get comitted
 // to Elasticsearch.
-func (p *BulkProcessor) Before(fn BulkBeforeFunc) *BulkProcessor {
+func (p *BulkProcessorService) Before(fn BulkBeforeFunc) *BulkProcessorService {
 	p.beforeFn = fn
 	return p
 }
@@ -94,7 +94,7 @@ func (p *BulkProcessor) Before(fn BulkBeforeFunc) *BulkProcessor {
 // After specifies a function to be executed when bulk requests have been
 // comitted to Elasticsearch. The After callback always executes, even when
 // Elasticsearch reported an error (and therefor executes Failure callback).
-func (p *BulkProcessor) After(fn BulkAfterFunc) *BulkProcessor {
+func (p *BulkProcessorService) After(fn BulkAfterFunc) *BulkProcessorService {
 	p.afterFn = fn
 	return p
 }
@@ -102,34 +102,34 @@ func (p *BulkProcessor) After(fn BulkAfterFunc) *BulkProcessor {
 // Failure specifies a function to be executed when bulk requests failed
 // to be comitted successfully. The Failure callback is executed before
 // the After callback.
-func (p *BulkProcessor) Failure(fn BulkFailureFunc) *BulkProcessor {
+func (p *BulkProcessorService) Failure(fn BulkFailureFunc) *BulkProcessorService {
 	p.failureFn = fn
 	return p
 }
 
 // Name is an optional name to identify this bulk processor.
-func (p *BulkProcessor) Name(name string) *BulkProcessor {
+func (p *BulkProcessorService) Name(name string) *BulkProcessorService {
 	p.name = name
 	return p
 }
 
 // Workers is the number of concurrent workers allowed to be
 // executed. Defaults to 1 and must be greater or equal to 1.
-func (p *BulkProcessor) Workers(num int) *BulkProcessor {
+func (p *BulkProcessorService) Workers(num int) *BulkProcessorService {
 	p.numWorkers = num
 	return p
 }
 
 // BulkActions specifies when to flush based on the number of actions
 // currently added. Defaults to 1000 and can be set to -1 to be disabled.
-func (p *BulkProcessor) BulkActions(bulkActions int) *BulkProcessor {
+func (p *BulkProcessorService) BulkActions(bulkActions int) *BulkProcessorService {
 	p.bulkActions = bulkActions
 	return p
 }
 
 // BulkByteSize specifies when to flush based on the size of the actions
 // currently added. Defaults to 5 MB and can be set to -1 to be disabled.
-func (p *BulkProcessor) BulkByteSize(bulkByteSize int) *BulkProcessor {
+func (p *BulkProcessorService) BulkByteSize(bulkByteSize int) *BulkProcessorService {
 	p.bulkByteSize = bulkByteSize
 	return p
 }
@@ -138,21 +138,21 @@ func (p *BulkProcessor) BulkByteSize(bulkByteSize int) *BulkProcessor {
 // This is disabled by default. If you want the bulk processor to
 // operate completely asynchronously, set both BulkActions and BulkSize to
 // -1 and set the FlushInterval to a meaningful interval.
-func (p *BulkProcessor) FlushInterval(interval time.Duration) *BulkProcessor {
+func (p *BulkProcessorService) FlushInterval(interval time.Duration) *BulkProcessorService {
 	p.flushInterval = interval
 	return p
 }
 
 // CollectStats tells bulk processor to gather stats while running.
 // Use Stats to return the stats. This is disabled by default.
-func (p *BulkProcessor) CollectStats(enable bool) *BulkProcessor {
+func (p *BulkProcessorService) CollectStats(enable bool) *BulkProcessorService {
 	p.wantStats = enable
 	return p
 }
 
 // Stats returns the latest bulk processor statistics.
 // Collecting stats must be enabled first by calling CollectStats(true).
-func (p *BulkProcessor) Stats() BulkProcessorStats {
+func (p *BulkProcessorService) Stats() BulkProcessorStats {
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
 	return *p.stats
@@ -160,7 +160,7 @@ func (p *BulkProcessor) Stats() BulkProcessorStats {
 
 // Do starts the bulk processor. Use Close to stop it.
 // If the processor is already running, this is a no-op and nil is returned.
-func (p *BulkProcessor) Do() error {
+func (p *BulkProcessorService) Do() error {
 	if p.running {
 		return nil
 	}
@@ -195,7 +195,7 @@ func (p *BulkProcessor) Do() error {
 
 // Close stops the bulk processor previously started with Do.
 // If it is already stopped, this is a no-op and nil is returned.
-func (p *BulkProcessor) Close() error {
+func (p *BulkProcessorService) Close() error {
 	// Already stopped? Do nothing.
 	if !p.running {
 		return nil
@@ -218,16 +218,16 @@ func (p *BulkProcessor) Close() error {
 	return nil
 }
 
-// Add adds a single request to commit by the BulkProcessor.
+// Add adds a single request to commit by the BulkProcessorService.
 //
 // The caller is responsible for setting the index and type on the request.
-func (p *BulkProcessor) Add(request BulkableRequest) {
+func (p *BulkProcessorService) Add(request BulkableRequest) {
 	p.requestsC <- request
 }
 
 // Flush manually asks all workers to commit their outstanding requests.
 // It returns only when all workers acknowledge completion.
-func (p *BulkProcessor) Flush() error {
+func (p *BulkProcessorService) Flush() error {
 	atomic.AddInt64(&p.stats.Flushed, 1)
 	for _, w := range p.workers {
 		w.flushC <- struct{}{}
@@ -239,7 +239,7 @@ func (p *BulkProcessor) Flush() error {
 // flusher is a single goroutine that periodically asks all workers to
 // commit their outstanding bulk requests. It is only started if
 // FlushInterval is greater than 0.
-func (p *BulkProcessor) flusher(interval time.Duration) {
+func (p *BulkProcessorService) flusher(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -256,9 +256,9 @@ func (p *BulkProcessor) flusher(interval time.Duration) {
 }
 
 // bulkWorker is a single worker receiving bulk requests and eventually
-// committing them to Elasticsearch. It is strongly bound to a BulkProcessor.
+// committing them to Elasticsearch. It is strongly bound to a BulkProcessorService.
 type bulkWorker struct {
-	p            *BulkProcessor
+	p            *BulkProcessorService
 	bulkActions  int
 	bulkByteSize int
 	service      *BulkService
@@ -267,7 +267,7 @@ type bulkWorker struct {
 }
 
 // newBulkWorker creates a new bulkWorker instance.
-func newBulkWorker(p *BulkProcessor) *bulkWorker {
+func newBulkWorker(p *BulkProcessorService) *bulkWorker {
 	return &bulkWorker{
 		p:            p,
 		bulkActions:  p.bulkActions,
@@ -361,7 +361,7 @@ func (w *bulkWorker) commit() error {
 // commitRequired returns true if the service has to commit its
 // bulk requests. This can be either because the number of actions
 // or the estimated size in bytes is larger than specified in the
-// BulkProcessor.
+// BulkProcessorService.
 func (w *bulkWorker) commitRequired() bool {
 	if w.bulkActions >= 0 && w.service.NumberOfActions() >= w.bulkActions {
 		return true
