@@ -167,7 +167,7 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 	}
 }
 
-func TestBulkProcessorFlushOnClose(t *testing.T) {
+func TestBulkProcessorClose(t *testing.T) {
 	//client := setupTestClientAndCreateIndexAndLog(t, SetTraceLog(log.New(os.Stdout, "", 0)))
 	client := setupTestClientAndCreateIndex(t)
 
@@ -253,7 +253,7 @@ func TestBulkProcessorFlush(t *testing.T) {
 
 	p := NewBulkProcessor(client).
 		Name("ManualFlush").
-		Workers(2).
+		Workers(10).
 		BulkActions(-1).
 		BulkByteSize(-1).
 		FlushInterval(30 * time.Second). // 30 seconds to flush
