@@ -101,10 +101,10 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 		atomic.AddInt64(&beforeRequests, int64(len(requests)))
 		atomic.AddInt64(&befores, 1)
 	}
-	afterCallback := func(executionId int64, response *BulkResponse) {
+	afterCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse) {
 		atomic.AddInt64(&afters, 1)
 	}
-	failureCallback := func(executionId int64, response *BulkResponse, err error) {
+	failureCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
 		atomic.AddInt64(&failures, 1)
 	}
 
@@ -180,10 +180,10 @@ func TestBulkProcessorClose(t *testing.T) {
 		atomic.AddInt64(&beforeRequests, int64(len(requests)))
 		atomic.AddInt64(&befores, 1)
 	}
-	afterCallback := func(executionId int64, response *BulkResponse) {
+	afterCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse) {
 		atomic.AddInt64(&afters, 1)
 	}
-	failureCallback := func(executionId int64, response *BulkResponse, err error) {
+	failureCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
 		atomic.AddInt64(&failures, 1)
 	}
 
@@ -333,10 +333,10 @@ func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessorService) {
 		atomic.AddInt64(&beforeRequests, int64(len(requests)))
 		atomic.AddInt64(&befores, 1)
 	}
-	afterCallback := func(executionId int64, response *BulkResponse) {
+	afterCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse) {
 		atomic.AddInt64(&afters, 1)
 	}
-	failureCallback := func(executionId int64, response *BulkResponse, err error) {
+	failureCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
 		atomic.AddInt64(&failures, 1)
 	}
 

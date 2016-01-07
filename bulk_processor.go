@@ -78,11 +78,11 @@ type BulkBeforeFunc func(executionId int64, requests []BulkableRequest)
 
 // BulkBeforeFunc defines the signature of callbacks that are executed
 // after a commit to Elasticsearch, regardless of being successful or not.
-type BulkAfterFunc func(executionId int64, response *BulkResponse)
+type BulkAfterFunc func(executionId int64, requests []BulkableRequest, response *BulkResponse)
 
 // BulkFailureFunc defines the signature of callbacks that are executed
 // when Elasticsearch reports an error.
-type BulkFailureFunc func(executionId int64, response *BulkResponse, err error)
+type BulkFailureFunc func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error)
 
 // Before specifies a function to be executed before bulk requests get comitted
 // to Elasticsearch.
@@ -332,7 +332,7 @@ func (w *bulkWorker) commit() error {
 
 		// Invoke failure callback
 		if w.p.failureFn != nil {
-			w.p.failureFn(id, res, err)
+			w.p.failureFn(id, w.service.requests, res, err)
 		}
 		return err
 	}
@@ -352,7 +352,7 @@ func (w *bulkWorker) commit() error {
 
 	// Invoke after callback
 	if w.p.afterFn != nil {
-		w.p.afterFn(id, res)
+		w.p.afterFn(id, w.service.requests, res)
 	}
 
 	return nil
