@@ -178,8 +178,7 @@ func (p *BulkProcessor) Do() error {
 	p.workers = make([]*bulkWorker, p.numWorkers)
 	for i := 0; i < p.numWorkers; i++ {
 		p.workerWg.Add(1)
-		flushC := make(chan struct{})
-		p.workers[i] = newBulkWorker(p, flushC)
+		p.workers[i] = newBulkWorker(p)
 		go p.workers[i].work()
 	}
 
@@ -232,7 +231,7 @@ func (p *BulkProcessor) Flush() error {
 	atomic.AddInt64(&p.stats.Flushed, 1)
 	for _, w := range p.workers {
 		w.flushC <- struct{}{}
-		<-w.flushC // wait for completion
+		<-w.flushAckC // wait for completion
 	}
 	return nil
 }
@@ -264,23 +263,29 @@ type bulkWorker struct {
 	bulkByteSize int
 	service      *BulkService
 	flushC       chan struct{}
+	flushAckC    chan struct{}
 }
 
 // newBulkWorker creates a new bulkWorker instance.
-func newBulkWorker(p *BulkProcessor, flushC chan struct{}) *bulkWorker {
+func newBulkWorker(p *BulkProcessor) *bulkWorker {
 	return &bulkWorker{
 		p:            p,
 		bulkActions:  p.bulkActions,
 		bulkByteSize: p.bulkByteSize,
 		service:      NewBulkService(p.c),
-		flushC:       flushC,
+		flushC:       make(chan struct{}),
+		flushAckC:    make(chan struct{}),
 	}
 }
 
 // work waits for bulk requests and manual flush calls on the respective
 // channels and is invoked as a goroutine when the bulk processor is started.
 func (w *bulkWorker) work() {
-	defer w.p.workerWg.Done()
+	defer func() {
+		w.p.workerWg.Done()
+		close(w.flushAckC)
+		close(w.flushC)
+	}()
 
 	var stop bool
 	for !stop {
@@ -305,7 +310,7 @@ func (w *bulkWorker) work() {
 			if w.service.NumberOfActions() > 0 {
 				w.commit() // TODO swallow errors here?
 			}
-			w.flushC <- struct{}{}
+			w.flushAckC <- struct{}{}
 		}
 	}
 }
