@@ -17,10 +17,7 @@ func TestBulkProcessorDefaults(t *testing.T) {
 
 	p := client.BulkProcessor()
 	if p == nil {
-		t.Fatalf("expected BulkProcessor; got: %v", p)
-	}
-	if got, want := p.running, false; got != want {
-		t.Errorf("expected %v; got: %v", want, got)
+		t.Fatalf("expected BulkProcessorService; got: %v", p)
 	}
 	if got, want := p.name, ""; got != want {
 		t.Errorf("expected %q; got: %q", want, got)
@@ -31,7 +28,7 @@ func TestBulkProcessorDefaults(t *testing.T) {
 	if got, want := p.bulkActions, 1000; got != want {
 		t.Errorf("expected %d; got: %d", want, got)
 	}
-	if got, want := p.bulkByteSize, 5*1024*1024; got != want {
+	if got, want := p.bulkSize, 5*1024*1024; got != want {
 		t.Errorf("expected %d; got: %d", want, got)
 	}
 	if got, want := p.flushInterval, time.Duration(0); got != want {
@@ -42,49 +39,49 @@ func TestBulkProcessorDefaults(t *testing.T) {
 	}
 }
 
-func TestBulkProcessorBasedOnBulkActions(t *testing.T) {
+func TestBulkProcessorCommitOnBulkActions(t *testing.T) {
 	//client := setupTestClientAndCreateIndexAndLog(t, SetTraceLog(log.New(os.Stdout, "", 0)))
 	client := setupTestClientAndCreateIndex(t)
 
 	testBulkProcessor(t,
 		10000,
 		client.BulkProcessor().
-			Name("ByteActions-1").
+			Name("Actions-1").
 			Workers(1).
 			BulkActions(100).
-			BulkByteSize(-1),
+			BulkSize(-1),
 	)
 
 	testBulkProcessor(t,
 		10000,
 		client.BulkProcessor().
-			Name("ByteActions-2").
+			Name("Actions-2").
 			Workers(2).
 			BulkActions(100).
-			BulkByteSize(-1),
+			BulkSize(-1),
 	)
 }
 
-func TestBulkProcessorBasedOnBulkSizeInBytes(t *testing.T) {
+func TestBulkProcessorCommitOnBulkSize(t *testing.T) {
 	//client := setupTestClientAndCreateIndexAndLog(t, SetTraceLog(log.New(os.Stdout, "", 0)))
 	client := setupTestClientAndCreateIndex(t)
 
 	testBulkProcessor(t,
 		10000,
 		client.BulkProcessor().
-			Name("ByteSize-1").
+			Name("Size-1").
 			Workers(1).
 			BulkActions(-1).
-			BulkByteSize(64*1024),
+			BulkSize(64*1024),
 	)
 
 	testBulkProcessor(t,
 		10000,
 		client.BulkProcessor().
-			Name("ByteSize-2").
+			Name("Size-2").
 			Workers(2).
 			BulkActions(-1).
-			BulkByteSize(64*1024),
+			BulkSize(64*1024),
 	)
 }
 
@@ -108,15 +105,17 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 		atomic.AddInt64(&failures, 1)
 	}
 
-	p := client.BulkProcessor().
+	svc := client.BulkProcessor().
 		Name("FlushInterval-1").
 		Workers(2).
 		BulkActions(-1).
-		BulkByteSize(-1).
+		BulkSize(-1).
 		FlushInterval(1 * time.Second).
-		Before(beforeCallback).After(afterCallback).Failure(failureCallback)
+		Before(beforeCallback).
+		After(afterCallback).
+		Failure(failureCallback)
 
-	err := p.Do()
+	p, err := svc.Do()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,15 +186,14 @@ func TestBulkProcessorClose(t *testing.T) {
 		atomic.AddInt64(&failures, 1)
 	}
 
-	p := client.BulkProcessor().
+	p, err := client.BulkProcessor().
 		Name("FlushInterval-1").
 		Workers(2).
 		BulkActions(-1).
-		BulkByteSize(-1).
+		BulkSize(-1).
 		FlushInterval(30 * time.Second). // 30 seconds to flush
-		Before(beforeCallback).After(afterCallback).Failure(failureCallback)
-
-	err := p.Do()
+		Before(beforeCallback).After(afterCallback).Failure(failureCallback).
+		Do()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,15 +249,14 @@ func TestBulkProcessorFlush(t *testing.T) {
 	//client := setupTestClientAndCreateIndexAndLog(t, SetTraceLog(log.New(os.Stdout, "", 0)))
 	client := setupTestClientAndCreateIndex(t)
 
-	p := client.BulkProcessor().
+	p, err := client.BulkProcessor().
 		Name("ManualFlush").
 		Workers(10).
 		BulkActions(-1).
-		BulkByteSize(-1).
+		BulkSize(-1).
 		FlushInterval(30 * time.Second). // 30 seconds to flush
-		CollectStats(true)
-
-	err := p.Do()
+		Stats(true).
+		Do()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +320,7 @@ func TestBulkProcessorFlush(t *testing.T) {
 
 // -- Helper --
 
-func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessorService) {
+func testBulkProcessor(t *testing.T, numDocs int, svc *BulkProcessorService) {
 	var beforeRequests int64
 	var befores int64
 	var afters int64
@@ -340,7 +337,7 @@ func testBulkProcessor(t *testing.T, numDocs int, p *BulkProcessorService) {
 		atomic.AddInt64(&failures, 1)
 	}
 
-	err := p.CollectStats(true).
+	p, err := svc.Stats(true).
 		Before(beforeCallback).
 		After(afterCallback).
 		Failure(failureCallback).
