@@ -337,7 +337,10 @@ func (p *BulkProcessor) Add(request BulkableRequest) {
 // Flush manually asks all workers to commit their outstanding requests.
 // It returns only when all workers acknowledge completion.
 func (p *BulkProcessor) Flush() error {
-	atomic.AddInt64(&p.stats.Flushed, 1)
+	p.statsMu.Lock()
+	p.stats.Flushed++
+	p.statsMu.Unlock()
+
 	for _, w := range p.workers {
 		w.flushC <- struct{}{}
 		<-w.flushAckC // wait for completion
