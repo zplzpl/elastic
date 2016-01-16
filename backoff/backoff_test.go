@@ -1,3 +1,7 @@
+// Copyright 2012-2016 Oliver Eilhard. All rights reserved.
+// Use of this source code is governed by a MIT-license.
+// See http://olivere.mit-license.org/license.txt for details.
+
 package backoff
 
 import (
@@ -7,7 +11,7 @@ import (
 )
 
 func TestSimpleBackoff(t *testing.T) {
-	b := NewSimpleBackoff(false, false, 1, 2, 7)
+	b := NewSimpleBackoff(1, 2, 7)
 
 	if got, want := b.Next(), time.Duration(1)*time.Millisecond; got != want {
 		t.Errorf("expected %v; got: %v", want, got)
@@ -39,7 +43,7 @@ func TestSimpleBackoff(t *testing.T) {
 }
 
 func TestSimpleBackoffWithStop(t *testing.T) {
-	b := NewSimpleBackoff(false, true, 1, 2, 7)
+	b := NewSimpleBackoff(1, 2, 7).SendStop(true)
 
 	// It should eventually return Stop (-1) after some loops.
 	var last time.Duration
@@ -72,7 +76,7 @@ func TestThainBackoff(t *testing.T) {
 
 	min := time.Duration(8) * time.Millisecond
 	max := time.Duration(256) * time.Millisecond
-	b := NewThainBackoff(min, max, false)
+	b := NewThainBackoff(min, max)
 
 	between := func(value time.Duration, a, b int) bool {
 		x := int(value / time.Millisecond)
@@ -113,7 +117,7 @@ func TestThainBackoffWithStop(t *testing.T) {
 
 	min := time.Duration(8) * time.Millisecond
 	max := time.Duration(256) * time.Millisecond
-	b := NewThainBackoff(min, max, true)
+	b := NewThainBackoff(min, max).SendStop(true)
 
 	// It should eventually return Stop (-1) after some loops.
 	var last time.Duration

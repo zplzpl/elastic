@@ -1,3 +1,7 @@
+// Copyright 2012-2016 Oliver Eilhard. All rights reserved.
+// Use of this source code is governed by a MIT-license.
+// See http://olivere.mit-license.org/license.txt for details.
+
 package backoff
 
 import (
@@ -32,16 +36,31 @@ type SimpleBackoff struct {
 }
 
 // NewSimpleBackoff creates a SimpleBackoff algorithm with the specified
-// list of fixed intervals in milliseconds. Set jitter to randomize the
-// values. Set stop to true to indicate that Next should return Stop once
-// the list of values is exhausted.
-func NewSimpleBackoff(jitter, stop bool, ticks ...int) Backoff {
+// list of fixed intervals in milliseconds.
+func NewSimpleBackoff(ticks ...int) *SimpleBackoff {
 	return &SimpleBackoff{
 		ticks:  ticks,
 		index:  0,
-		jitter: jitter,
-		stop:   stop,
+		jitter: false,
+		stop:   false,
 	}
+}
+
+// Jitter, when set, randomizes to return a value of [0.5*value .. 1.5*value].
+func (b *SimpleBackoff) Jitter(doJitter bool) *SimpleBackoff {
+	b.Lock()
+	defer b.Unlock()
+	b.jitter = doJitter
+	return b
+}
+
+// SendStop, when enables, makes Next to return Stop once
+// the list of values is exhausted.
+func (b *SimpleBackoff) SendStop(doStop bool) *SimpleBackoff {
+	b.Lock()
+	defer b.Unlock()
+	b.stop = doStop
+	return b
 }
 
 // Next returns the next wait interval.
@@ -95,16 +114,29 @@ type ThainBackoff struct {
 	stop bool    // indicates whether Next should send "Stop" whan max timeout is reached
 }
 
-func NewThainBackoff(initialTimeout, maxTimeout time.Duration, stop bool) Backoff {
+// NewThainBackoff returns a ThainBackoff backoff policy.
+// Use initialTimeout to set the first/minimal interval
+// and maxTimeout to set the maximum wait interval.
+func NewThainBackoff(initialTimeout, maxTimeout time.Duration) *ThainBackoff {
 	return &ThainBackoff{
 		t:    float64(int64(initialTimeout / time.Millisecond)),
 		f:    2.0,
 		m:    float64(int64(maxTimeout / time.Millisecond)),
 		n:    0,
-		stop: stop,
+		stop: false,
 	}
 }
 
+// SendStop, when enables, makes Next to return Stop once
+// the maximum timeout is reached.
+func (b *ThainBackoff) SendStop(doStop bool) *ThainBackoff {
+	b.Lock()
+	defer b.Unlock()
+	b.stop = doStop
+	return b
+}
+
+// Next returns the next wait interval.
 func (t *ThainBackoff) Next() time.Duration {
 	t.Lock()
 	defer t.Unlock()
@@ -119,6 +151,7 @@ func (t *ThainBackoff) Next() time.Duration {
 	return d
 }
 
+// Reset resets the backoff policy so that it can be reused.
 func (t *ThainBackoff) Reset() {
 	t.Lock()
 	t.n = 0

@@ -461,7 +461,7 @@ func (w *bulkWorker) commit() error {
 	}
 
 	// Commit bulk requests
-	policy := backoff.NewThainBackoff(w.p.initialTimeout, w.p.maxTimeout, true)
+	policy := backoff.NewThainBackoff(w.p.initialTimeout, w.p.maxTimeout).SendStop(true)
 	err := backoff.RetryNotify(commitFunc, policy, notifyFunc)
 	w.updateStats(res)
 	if err != nil {
