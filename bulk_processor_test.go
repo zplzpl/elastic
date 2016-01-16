@@ -94,15 +94,15 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 	var afters int64
 	var failures int64
 
-	beforeCallback := func(executionId int64, requests []BulkableRequest) {
+	beforeFn := func(executionId int64, requests []BulkableRequest) {
 		atomic.AddInt64(&beforeRequests, int64(len(requests)))
 		atomic.AddInt64(&befores, 1)
 	}
-	afterCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse) {
+	afterFn := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
 		atomic.AddInt64(&afters, 1)
-	}
-	failureCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
-		atomic.AddInt64(&failures, 1)
+		if err != nil {
+			atomic.AddInt64(&failures, 1)
+		}
 	}
 
 	svc := client.BulkProcessor().
@@ -111,9 +111,8 @@ func TestBulkProcessorBasedOnFlushInterval(t *testing.T) {
 		BulkActions(-1).
 		BulkSize(-1).
 		FlushInterval(1 * time.Second).
-		Before(beforeCallback).
-		After(afterCallback).
-		Failure(failureCallback)
+		Before(beforeFn).
+		After(afterFn)
 
 	p, err := svc.Do()
 	if err != nil {
@@ -175,15 +174,15 @@ func TestBulkProcessorClose(t *testing.T) {
 	var afters int64
 	var failures int64
 
-	beforeCallback := func(executionId int64, requests []BulkableRequest) {
+	beforeFn := func(executionId int64, requests []BulkableRequest) {
 		atomic.AddInt64(&beforeRequests, int64(len(requests)))
 		atomic.AddInt64(&befores, 1)
 	}
-	afterCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse) {
+	afterFn := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
 		atomic.AddInt64(&afters, 1)
-	}
-	failureCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
-		atomic.AddInt64(&failures, 1)
+		if err != nil {
+			atomic.AddInt64(&failures, 1)
+		}
 	}
 
 	p, err := client.BulkProcessor().
@@ -192,7 +191,7 @@ func TestBulkProcessorClose(t *testing.T) {
 		BulkActions(-1).
 		BulkSize(-1).
 		FlushInterval(30 * time.Second). // 30 seconds to flush
-		Before(beforeCallback).After(afterCallback).Failure(failureCallback).
+		Before(beforeFn).After(afterFn).
 		Do()
 	if err != nil {
 		t.Fatal(err)
@@ -326,32 +325,26 @@ func testBulkProcessor(t *testing.T, numDocs int, svc *BulkProcessorService) {
 	var afters int64
 	var failures int64
 
-	beforeCallback := func(executionId int64, requests []BulkableRequest) {
+	beforeFn := func(executionId int64, requests []BulkableRequest) {
 		atomic.AddInt64(&beforeRequests, int64(len(requests)))
 		atomic.AddInt64(&befores, 1)
 	}
-	afterCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse) {
+	afterFn := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
 		atomic.AddInt64(&afters, 1)
-	}
-	failureCallback := func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error) {
-		atomic.AddInt64(&failures, 1)
+		if err != nil {
+			atomic.AddInt64(&failures, 1)
+		}
 	}
 
-	p, err := svc.Stats(true).
-		Before(beforeCallback).
-		After(afterCallback).
-		Failure(failureCallback).
-		Do()
+	p, err := svc.Before(beforeFn).After(afterFn).Stats(true).Do()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	for i := 1; i <= numDocs; i++ {
-		tweet := tweet{User: "olivere", Message: fmt.Sprintf("%d. %s", i, randomString(rand.Intn(64)))}
+		tweet := tweet{User: "olivere", Message: fmt.Sprintf("%07d. %s", i, randomString(1+rand.Intn(63)))}
 		request := NewBulkIndexRequest().Index(testIndexName).Type("tweet").Id(fmt.Sprintf("%d", i)).Doc(tweet)
 		p.Add(request)
-
-		_ = p.Stats()
 	}
 
 	err = p.Close()

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"gopkg.in/olivere/elastic.v3/backoff"
 )
 
 // BulkProcessorService allows to easily process bulk requests. It allows setting
@@ -18,7 +20,8 @@ import (
 //
 // BulkProcessorService, by default, commits either every 1000 requests or when the
 // (estimated) size of the bulk requests exceeds 5 MB. However, it does not
-// commit periodically.
+// commit periodically. BulkProcessorService also does retry by default, using
+// an exponential backoff algorithm.
 //
 // The caller is responsible for setting the index and type on every
 // bulk request added to BulkProcessorService.
@@ -27,25 +30,28 @@ import (
 // Elasticsearch Java API as documented in
 // https://www.elastic.co/guide/en/elasticsearch/client/java-api/current/java-docs-bulk-processor.html.
 type BulkProcessorService struct {
-	c             *Client
-	beforeFn      BulkBeforeFunc
-	afterFn       BulkAfterFunc
-	failureFn     BulkFailureFunc
-	name          string        // name of processor
-	numWorkers    int           // # of workers (>= 1)
-	bulkActions   int           // # of requests after which to commit
-	bulkSize      int           // # of bytes after which to commit
-	flushInterval time.Duration // periodic flush interval
-	wantStats     bool          // indicates whether to gather statistics
+	c              *Client
+	beforeFn       BulkBeforeFunc
+	afterFn        BulkAfterFunc
+	name           string        // name of processor
+	numWorkers     int           // # of workers (>= 1)
+	bulkActions    int           // # of requests after which to commit
+	bulkSize       int           // # of bytes after which to commit
+	flushInterval  time.Duration // periodic flush interval
+	wantStats      bool          // indicates whether to gather statistics
+	initialTimeout time.Duration // initial wait time before retry on errors
+	maxTimeout     time.Duration // max time to wait for retry on errors
 }
 
 // NewBulkProcessorService creates a new BulkProcessorService.
 func NewBulkProcessorService(client *Client) *BulkProcessorService {
 	return &BulkProcessorService{
-		c:           client,
-		numWorkers:  1,
-		bulkActions: 1000,
-		bulkSize:    5 << 20, // 5 MB
+		c:              client,
+		numWorkers:     1,
+		bulkActions:    1000,
+		bulkSize:       5 << 20, // 5 MB
+		initialTimeout: time.Duration(200) * time.Millisecond,
+		maxTimeout:     time.Duration(10000) * time.Millisecond,
 	}
 }
 
@@ -53,13 +59,9 @@ func NewBulkProcessorService(client *Client) *BulkProcessorService {
 // before a commit to Elasticsearch.
 type BulkBeforeFunc func(executionId int64, requests []BulkableRequest)
 
-// BulkBeforeFunc defines the signature of callbacks that are executed
-// after a commit to Elasticsearch, regardless of being successful or not.
-type BulkAfterFunc func(executionId int64, requests []BulkableRequest, response *BulkResponse)
-
-// BulkFailureFunc defines the signature of callbacks that are executed
-// when Elasticsearch reports an error.
-type BulkFailureFunc func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error)
+// BulkAfterFunc defines the signature of callbacks that are executed
+// after a commit to Elasticsearch. The err parameter signals an error.
+type BulkAfterFunc func(executionId int64, requests []BulkableRequest, response *BulkResponse, err error)
 
 // Before specifies a function to be executed before bulk requests get comitted
 // to Elasticsearch.
@@ -69,18 +71,10 @@ func (s *BulkProcessorService) Before(fn BulkBeforeFunc) *BulkProcessorService {
 }
 
 // After specifies a function to be executed when bulk requests have been
-// comitted to Elasticsearch. The After callback always executes, even when
-// Elasticsearch reported an error (and therefor executes Failure callback).
+// comitted to Elasticsearch. The After callback executes both when the
+// commit was successful as well as on failures.
 func (s *BulkProcessorService) After(fn BulkAfterFunc) *BulkProcessorService {
 	s.afterFn = fn
-	return s
-}
-
-// Failure specifies a function to be executed when bulk requests failed
-// to be comitted successfully. The Failure callback is executed before
-// the After callback.
-func (s *BulkProcessorService) Failure(fn BulkFailureFunc) *BulkProcessorService {
-	s.failureFn = fn
 	return s
 }
 
@@ -142,13 +136,14 @@ func (s *BulkProcessorService) Do() (*BulkProcessor, error) {
 		s.c,
 		s.beforeFn,
 		s.afterFn,
-		s.failureFn,
 		s.name,
 		s.numWorkers,
 		s.bulkActions,
 		s.bulkSize,
 		s.flushInterval,
-		s.wantStats)
+		s.wantStats,
+		s.initialTimeout,
+		s.maxTimeout)
 
 	err := p.Start()
 	if err != nil {
@@ -170,6 +165,25 @@ type BulkProcessorStats struct {
 	Deleted   int64 // # of requests that ES reported as deletes
 	Succeeded int64 // # of requests that ES reported as successful
 	Failed    int64 // # of requests that ES reported as failed
+
+	Workers []*BulkProcessorWorkerStats // stats for each worker
+}
+
+// BulkProcessorWorkerStats represents per-worker statistics.
+type BulkProcessorWorkerStats struct {
+	Queued       int64         // # of requests queued in this worker
+	LastDuration time.Duration // duration of last commit
+}
+
+// newBulkProcessorStats initializes and returns a BulkProcessorStats struct.
+func newBulkProcessorStats(workers int) *BulkProcessorStats {
+	stats := &BulkProcessorStats{
+		Workers: make([]*BulkProcessorWorkerStats, workers),
+	}
+	for i := 0; i < workers; i++ {
+		stats.Workers[i] = &BulkProcessorWorkerStats{}
+	}
+	return stats
 }
 
 // -- Bulk Processor --
@@ -180,21 +194,22 @@ type BulkProcessorStats struct {
 // BulkProcessor is returned by setting up a BulkProcessorService and
 // calling the Do method.
 type BulkProcessor struct {
-	c             *Client
-	beforeFn      BulkBeforeFunc
-	afterFn       BulkAfterFunc
-	failureFn     BulkFailureFunc
-	name          string
-	bulkActions   int
-	bulkSize      int
-	numWorkers    int
-	executionId   int64
-	requestsC     chan BulkableRequest
-	workerWg      sync.WaitGroup
-	workers       []*bulkWorker
-	flushInterval time.Duration
-	flusherStopC  chan struct{}
-	wantStats     bool
+	c              *Client
+	beforeFn       BulkBeforeFunc
+	afterFn        BulkAfterFunc
+	name           string
+	bulkActions    int
+	bulkSize       int
+	numWorkers     int
+	executionId    int64
+	requestsC      chan BulkableRequest
+	workerWg       sync.WaitGroup
+	workers        []*bulkWorker
+	flushInterval  time.Duration
+	flusherStopC   chan struct{}
+	wantStats      bool
+	initialTimeout time.Duration // initial wait time before retry on errors
+	maxTimeout     time.Duration // max time to wait for retry on errors
 
 	startedMu sync.Mutex // guards the following block
 	started   bool
@@ -207,24 +222,26 @@ func newBulkProcessor(
 	client *Client,
 	beforeFn BulkBeforeFunc,
 	afterFn BulkAfterFunc,
-	failureFn BulkFailureFunc,
 	name string,
 	numWorkers int,
 	bulkActions int,
 	bulkSize int,
 	flushInterval time.Duration,
-	wantStats bool) *BulkProcessor {
+	wantStats bool,
+	initialTimeout time.Duration,
+	maxTimeout time.Duration) *BulkProcessor {
 	return &BulkProcessor{
-		c:             client,
-		beforeFn:      beforeFn,
-		afterFn:       afterFn,
-		failureFn:     failureFn,
-		name:          name,
-		numWorkers:    numWorkers,
-		bulkActions:   bulkActions,
-		bulkSize:      bulkSize,
-		flushInterval: flushInterval,
-		wantStats:     wantStats,
+		c:              client,
+		beforeFn:       beforeFn,
+		afterFn:        afterFn,
+		name:           name,
+		numWorkers:     numWorkers,
+		bulkActions:    bulkActions,
+		bulkSize:       bulkSize,
+		flushInterval:  flushInterval,
+		wantStats:      wantStats,
+		initialTimeout: initialTimeout,
+		maxTimeout:     maxTimeout,
 	}
 }
 
@@ -245,13 +262,13 @@ func (p *BulkProcessor) Start() error {
 
 	p.requestsC = make(chan BulkableRequest)
 	p.executionId = 0
-	p.stats = &BulkProcessorStats{}
+	p.stats = newBulkProcessorStats(p.numWorkers)
 
 	// Create and start up workers.
 	p.workers = make([]*bulkWorker, p.numWorkers)
 	for i := 0; i < p.numWorkers; i++ {
 		p.workerWg.Add(1)
-		p.workers[i] = newBulkWorker(p)
+		p.workers[i] = newBulkWorker(p, i)
 		go p.workers[i].work()
 	}
 
@@ -292,7 +309,7 @@ func (p *BulkProcessor) Close() error {
 		p.flusherStopC = nil
 	}
 
-	// Close all channels.
+	// Stop all workers.
 	close(p.requestsC)
 	p.workerWg.Wait()
 
@@ -354,6 +371,7 @@ func (p *BulkProcessor) flusher(interval time.Duration) {
 // It is strongly bound to a BulkProcessor.
 type bulkWorker struct {
 	p           *BulkProcessor
+	i           int
 	bulkActions int
 	bulkSize    int
 	service     *BulkService
@@ -362,9 +380,10 @@ type bulkWorker struct {
 }
 
 // newBulkWorker creates a new bulkWorker instance.
-func newBulkWorker(p *BulkProcessor) *bulkWorker {
+func newBulkWorker(p *BulkProcessor, i int) *bulkWorker {
 	return &bulkWorker{
 		p:           p,
+		i:           i,
 		bulkActions: p.bulkActions,
 		bulkSize:    p.bulkSize,
 		service:     NewBulkService(p.c),
@@ -413,7 +432,28 @@ func (w *bulkWorker) work() {
 // commit commits the bulk requests in the given service,
 // invoking callbacks as specified.
 func (w *bulkWorker) commit() error {
+	var res *BulkResponse
+
+	// commitFunc will commit bulk requests and, on failure, be retried
+	// via exponential backoff
+	commitFunc := func() error {
+		var err error
+		res, err = w.service.Do()
+		return err
+	}
+	// notifyFunc will be called if retry fails
+	notifyFunc := func(err error, d time.Duration) {
+		w.p.c.errorf("elastic: bulk processor %q failed but will retry in %v: %v", w.p.name, d, err)
+	}
+
 	id := atomic.AddInt64(&w.p.executionId, 1)
+
+	// Update # documents in queue before eventual retries
+	w.p.statsMu.Lock()
+	if w.p.wantStats {
+		w.p.stats.Workers[w.i].Queued = int64(len(w.service.requests))
+	}
+	w.p.statsMu.Unlock()
 
 	// Invoke before callback
 	if w.p.beforeFn != nil {
@@ -421,36 +461,40 @@ func (w *bulkWorker) commit() error {
 	}
 
 	// Commit bulk requests
-	res, err := w.service.Do()
+	policy := backoff.NewThainBackoff(w.p.initialTimeout, w.p.maxTimeout, true)
+	err := backoff.RetryNotify(commitFunc, policy, notifyFunc)
+	w.updateStats(res)
 	if err != nil {
 		w.p.c.errorf("elastic: bulk processor %q failed: %v", w.p.name, err)
-
-		// Invoke failure callback
-		if w.p.failureFn != nil {
-			w.p.failureFn(id, w.service.requests, res, err)
-		}
-		return err
 	}
-
-	// Update stats
-	w.p.statsMu.Lock()
-	if w.p.wantStats {
-		w.p.stats.Committed += 1
-		w.p.stats.Indexed += int64(len(res.Indexed()))
-		w.p.stats.Created += int64(len(res.Created()))
-		w.p.stats.Updated += int64(len(res.Updated()))
-		w.p.stats.Deleted += int64(len(res.Deleted()))
-		w.p.stats.Succeeded += int64(len(res.Succeeded()))
-		w.p.stats.Failed += int64(len(res.Failed()))
-	}
-	w.p.statsMu.Unlock()
 
 	// Invoke after callback
 	if w.p.afterFn != nil {
-		w.p.afterFn(id, w.service.requests, res)
+		w.p.afterFn(id, w.service.requests, res, err)
 	}
 
-	return nil
+	return err
+}
+
+func (w *bulkWorker) updateStats(res *BulkResponse) {
+	// Update stats
+	if res != nil {
+		w.p.statsMu.Lock()
+		if w.p.wantStats {
+			w.p.stats.Committed++
+			if res != nil {
+				w.p.stats.Indexed += int64(len(res.Indexed()))
+				w.p.stats.Created += int64(len(res.Created()))
+				w.p.stats.Updated += int64(len(res.Updated()))
+				w.p.stats.Deleted += int64(len(res.Deleted()))
+				w.p.stats.Succeeded += int64(len(res.Succeeded()))
+				w.p.stats.Failed += int64(len(res.Failed()))
+			}
+			w.p.stats.Workers[w.i].Queued = int64(len(w.service.requests))
+			w.p.stats.Workers[w.i].LastDuration = time.Duration(int64(res.Took)) * time.Millisecond
+		}
+		w.p.statsMu.Unlock()
+	}
 }
 
 // commitRequired returns true if the service has to commit its
