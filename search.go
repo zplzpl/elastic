@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 
+	"golang.org/x/net/context"
+
 	"gopkg.in/olivere/elastic.v3/uritemplates"
 )
 
@@ -240,6 +242,12 @@ func (s *SearchService) Fields(fields ...string) *SearchService {
 
 // Do executes the search and returns a SearchResult.
 func (s *SearchService) Do() (*SearchResult, error) {
+	return s.DoC(nil)
+}
+
+// DoC executes the search and returns a SearchResult.
+// It passes the context to ctxhttp to support cancelation and timeout.
+func (s *SearchService) DoC(ctx context.Context) (*SearchResult, error) {
 	// Build url
 	path := "/"
 
@@ -298,7 +306,7 @@ func (s *SearchService) Do() (*SearchResult, error) {
 		}
 		body = src
 	}
-	res, err := s.client.PerformRequest("POST", path, params, body)
+	res, err := s.client.PerformRequestC(ctx, "POST", path, params, body)
 	if err != nil {
 		return nil, err
 	}

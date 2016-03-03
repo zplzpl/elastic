@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/net/context"
 )
 
 func findConn(s string, slice ...*conn) (int, bool) {
@@ -895,5 +897,30 @@ func TestPerformRequestWithSetBodyError(t *testing.T) {
 	}
 	if res != nil {
 		t.Fatal("expected no response")
+	}
+}
+
+// -- PerformRequest with net/context --
+
+func TestPerformRequestC(t *testing.T) {
+	client, err := NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	res, err := client.PerformRequestC(ctx, "GET", "/", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res == nil {
+		t.Fatal("expected response to be != nil")
+	}
+
+	ret := new(PingResult)
+	if err := json.Unmarshal(res.Body, ret); err != nil {
+		t.Fatalf("expected no error on decode; got: %v", err)
+	}
+	if ret.ClusterName == "" {
+		t.Errorf("expected cluster name; got: %q", ret.ClusterName)
 	}
 }
