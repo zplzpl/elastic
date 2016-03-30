@@ -5,6 +5,7 @@
 package elastic
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -166,44 +167,53 @@ func (r *BulkIndexRequest) Source() ([]string, error) {
 	lines := make([]string, 2)
 
 	// "index" ...
-	command := make(map[string]interface{})
-	indexCommand := make(map[string]interface{})
+	var comma bool
+	var buf bytes.Buffer
+	var add = func(k, v string) {
+		if comma {
+			buf.WriteString(",")
+		}
+		buf.WriteString(fmt.Sprintf(`%q:%q`, k, v))
+		comma = true
+	}
+
+	buf.WriteString("{")
+	if r.id != "" {
+		add("_id", r.id)
+	}
 	if r.index != "" {
-		indexCommand["_index"] = r.index
+		add("_index", r.index)
 	}
 	if r.typ != "" {
-		indexCommand["_type"] = r.typ
-	}
-	if r.id != "" {
-		indexCommand["_id"] = r.id
-	}
-	if r.routing != "" {
-		indexCommand["_routing"] = r.routing
+		add("_type", r.typ)
 	}
 	if r.parent != "" {
-		indexCommand["_parent"] = r.parent
+		add("_parent", r.parent)
+	}
+	if r.routing != "" {
+		add("_routing", r.routing)
 	}
 	if r.timestamp != "" {
-		indexCommand["_timestamp"] = r.timestamp
+		add("_timestamp", r.timestamp)
 	}
 	if r.ttl > 0 {
-		indexCommand["_ttl"] = r.ttl
+		add("_ttl", fmt.Sprintf("%d", r.ttl))
 	}
 	if r.version > 0 {
-		indexCommand["_version"] = r.version
+		add("_version", fmt.Sprintf("%d", r.version))
 	}
 	if r.versionType != "" {
-		indexCommand["_version_type"] = r.versionType
+		add("_version_type", r.versionType)
 	}
 	if r.refresh != nil {
-		indexCommand["refresh"] = *r.refresh
+		if *r.refresh {
+			add("refresh", "true")
+		} else {
+			add("refresh", "false")
+		}
 	}
-	command[r.opType] = indexCommand
-	line, err := json.Marshal(command)
-	if err != nil {
-		return nil, err
-	}
-	lines[0] = string(line)
+	buf.WriteString("}")
+	lines[0] = fmt.Sprintf(`{"%s":%s}`, r.opType, buf.String())
 
 	// "field1" ...
 	if r.doc != nil {
