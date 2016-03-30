@@ -166,6 +166,9 @@ func (r *BulkIndexRequest) Source() ([]string, error) {
 
 	lines := make([]string, 2)
 
+	// We build the JSON via a buffer here to save time in JSON serialization.
+	// This is one of the hot paths for bulk indexing.
+
 	// "index" ...
 	var comma bool
 	var buf bytes.Buffer
@@ -173,37 +176,37 @@ func (r *BulkIndexRequest) Source() ([]string, error) {
 		if comma {
 			buf.WriteString(",")
 		}
-		buf.WriteString(fmt.Sprintf(`%q:%q`, k, v))
+		buf.WriteString(fmt.Sprintf(`%q:%s`, k, v))
 		comma = true
 	}
-
+	// Keep in alphabetical order to emulate behavior of JSON serializer and tests still pass
 	buf.WriteString("{")
 	if r.id != "" {
-		add("_id", r.id)
+		add("_id", fmt.Sprintf("%q", r.id))
 	}
 	if r.index != "" {
-		add("_index", r.index)
-	}
-	if r.typ != "" {
-		add("_type", r.typ)
+		add("_index", fmt.Sprintf("%q", r.index))
 	}
 	if r.parent != "" {
-		add("_parent", r.parent)
+		add("_parent", fmt.Sprintf("%q", r.parent))
 	}
 	if r.routing != "" {
-		add("_routing", r.routing)
+		add("_routing", fmt.Sprintf("%q", r.routing))
 	}
 	if r.timestamp != "" {
-		add("_timestamp", r.timestamp)
+		add("_timestamp", fmt.Sprintf("%q", r.timestamp))
 	}
 	if r.ttl > 0 {
 		add("_ttl", fmt.Sprintf("%d", r.ttl))
+	}
+	if r.typ != "" {
+		add("_type", fmt.Sprintf("%q", r.typ))
 	}
 	if r.version > 0 {
 		add("_version", fmt.Sprintf("%d", r.version))
 	}
 	if r.versionType != "" {
-		add("_version_type", r.versionType)
+		add("_version_type", fmt.Sprintf("%q", r.versionType))
 	}
 	if r.refresh != nil {
 		if *r.refresh {

@@ -5,6 +5,7 @@
 package elastic
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -208,48 +209,60 @@ func (r BulkUpdateRequest) Source() ([]string, error) {
 
 	lines := make([]string, 2)
 
+	// We build the JSON via a buffer here to save time in JSON serialization.
+	// This is one of the hot paths for bulk indexing.
+
 	// "update" ...
-	command := make(map[string]interface{})
-	updateCommand := make(map[string]interface{})
-	if r.index != "" {
-		updateCommand["_index"] = r.index
+	var comma bool
+	var buf bytes.Buffer
+	var add = func(k, v string) {
+		if comma {
+			buf.WriteString(",")
+		}
+		buf.WriteString(fmt.Sprintf(`%q:%s`, k, v))
+		comma = true
 	}
-	if r.typ != "" {
-		updateCommand["_type"] = r.typ
-	}
+	// Keep in alphabetical order to emulate behavior of JSON serializer and tests still pass
+	buf.WriteString("{")
 	if r.id != "" {
-		updateCommand["_id"] = r.id
+		add("_id", fmt.Sprintf("%q", r.id))
 	}
-	if r.routing != "" {
-		updateCommand["_routing"] = r.routing
+	if r.index != "" {
+		add("_index", fmt.Sprintf("%q", r.index))
 	}
 	if r.parent != "" {
-		updateCommand["_parent"] = r.parent
-	}
-	if r.timestamp != "" {
-		updateCommand["_timestamp"] = r.timestamp
-	}
-	if r.ttl > 0 {
-		updateCommand["_ttl"] = r.ttl
-	}
-	if r.version > 0 {
-		updateCommand["_version"] = r.version
-	}
-	if r.versionType != "" {
-		updateCommand["_version_type"] = r.versionType
-	}
-	if r.refresh != nil {
-		updateCommand["refresh"] = *r.refresh
+		add("_parent", fmt.Sprintf("%q", r.parent))
 	}
 	if r.retryOnConflict != nil {
-		updateCommand["_retry_on_conflict"] = *r.retryOnConflict
+		add("_retry_on_conflict", fmt.Sprintf("%d", *r.retryOnConflict))
 	}
-	command["update"] = updateCommand
-	line, err := json.Marshal(command)
-	if err != nil {
-		return nil, err
+	if r.routing != "" {
+		add("_routing", fmt.Sprintf("%q", r.routing))
 	}
-	lines[0] = string(line)
+	if r.timestamp != "" {
+		add("_timestamp", fmt.Sprintf("%q", r.timestamp))
+	}
+	if r.ttl > 0 {
+		add("_ttl", fmt.Sprintf("%d", r.ttl))
+	}
+	if r.typ != "" {
+		add("_type", fmt.Sprintf("%q", r.typ))
+	}
+	if r.version > 0 {
+		add("_version", fmt.Sprintf("%d", r.version))
+	}
+	if r.versionType != "" {
+		add("_version_type", fmt.Sprintf("%q", r.versionType))
+	}
+	if r.refresh != nil {
+		if *r.refresh {
+			add("refresh", "true")
+		} else {
+			add("refresh", "false")
+		}
+	}
+	buf.WriteString("}")
+	lines[0] = fmt.Sprintf(`{"update":%s}`, buf.String())
 
 	// 2nd line: {"doc" : { ... }} or {"script": {...}}
 	source := make(map[string]interface{})
@@ -270,6 +283,7 @@ func (r BulkUpdateRequest) Source() ([]string, error) {
 		}
 		source["script"] = src
 	}
+	var err error
 	lines[1], err = r.getSourceAsString(source)
 	if err != nil {
 		return nil, err

@@ -5,7 +5,7 @@
 package elastic
 
 import (
-	"encoding/json"
+	"bytes"
 	"fmt"
 	"strings"
 )
@@ -107,40 +107,49 @@ func (r *BulkDeleteRequest) Source() ([]string, error) {
 	if r.source != nil {
 		return r.source, nil
 	}
-	lines := make([]string, 1)
 
-	source := make(map[string]interface{})
-	deleteCommand := make(map[string]interface{})
-	if r.index != "" {
-		deleteCommand["_index"] = r.index
+	// We build the JSON via a buffer here to save time in JSON serialization.
+	// This is one of the hot paths for bulk indexing.
+
+	var comma bool
+	var buf bytes.Buffer
+	var add = func(k, v string) {
+		if comma {
+			buf.WriteString(",")
+		}
+		buf.WriteString(fmt.Sprintf(`%q:%s`, k, v))
+		comma = true
 	}
-	if r.typ != "" {
-		deleteCommand["_type"] = r.typ
-	}
+	// Keep in alphabetical order to emulate behavior of JSON serializer and tests still pass
+	buf.WriteString("{")
 	if r.id != "" {
-		deleteCommand["_id"] = r.id
+		add("_id", fmt.Sprintf("%q", r.id))
+	}
+	if r.index != "" {
+		add("_index", fmt.Sprintf("%q", r.index))
 	}
 	if r.routing != "" {
-		deleteCommand["_routing"] = r.routing
+		add("_routing", fmt.Sprintf("%q", r.routing))
+	}
+	if r.typ != "" {
+		add("_type", fmt.Sprintf("%q", r.typ))
 	}
 	if r.version > 0 {
-		deleteCommand["_version"] = r.version
+		add("_version", fmt.Sprintf("%d", r.version))
 	}
 	if r.versionType != "" {
-		deleteCommand["_version_type"] = r.versionType
+		add("_version_type", fmt.Sprintf("%q", r.versionType))
 	}
 	if r.refresh != nil {
-		deleteCommand["refresh"] = *r.refresh
+		if *r.refresh {
+			add("refresh", "true")
+		} else {
+			add("refresh", "false")
+		}
 	}
-	source["delete"] = deleteCommand
+	buf.WriteString("}")
 
-	body, err := json.Marshal(source)
-	if err != nil {
-		return nil, err
-	}
+	r.source = []string{fmt.Sprintf(`{"delete":%s}`, buf.String())}
 
-	lines[0] = string(body)
-	r.source = lines
-
-	return lines, nil
+	return r.source, nil
 }
