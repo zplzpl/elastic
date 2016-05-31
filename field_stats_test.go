@@ -228,8 +228,8 @@ func TestFieldStatsResponseUnmarshalling(t *testing.T) {
 		t.Errorf("expected creation_date to be in the fields map, didn't find it")
 	}
 
-	if fieldStats.MinValue != "2008-08-01T16:37:51.513Z" {
-		t.Errorf("expected creation_date min value to be %v, got %v", "2008-08-01T16:37:51.513Z", fieldStats.MinValue)
+	if fieldStats.MinValueAsString != "2008-08-01T16:37:51.513Z" {
+		t.Errorf("expected creation_date min value to be %v, got %v", "2008-08-01T16:37:51.513Z", fieldStats.MinValueAsString)
 	}
 }
 

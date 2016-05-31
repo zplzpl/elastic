@@ -238,11 +238,13 @@ type IndexFieldStats struct {
 
 // FieldStats contains stats of an individual  field
 type FieldStats struct {
-	MaxDoc                int64  `json:"max_doc"`
-	DocCount              int64  `json:"doc_count"`
-	Density               int64  `json:"density"`
-	SumDocFrequeny        int64  `json:"sum_doc_freq"`
-	SumTotalTermFrequency int64  `json:"sum_total_term_freq"`
-	MinValue              string `json:"min_value_as_string"`
-	MaxValue              string `json:"max_value_as_string"`
+	MaxDoc                int64       `json:"max_doc"`
+	DocCount              int64       `json:"doc_count"`
+	Density               int64       `json:"density"`
+	SumDocFrequeny        int64       `json:"sum_doc_freq"`
+	SumTotalTermFrequency int64       `json:"sum_total_term_freq"`
+	MinValue              interface{} `json:"min_value"`
+	MinValueAsString      string      `json:"min_value_as_string"`
+	MaxValue              interface{} `json:"max_value"`
+	MaxValueAsString      string      `json:"max_value_as_string"`
 }
