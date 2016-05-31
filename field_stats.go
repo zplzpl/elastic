@@ -220,10 +220,10 @@ type FieldConstraints struct {
 
 // Comparisons contain all comparison operations
 type Comparisons struct {
-	Lte string `json:"lte,omitempty"`
-	Lt  string `json:"lt,omitempty"`
-	Gte string `json:"gte,omitempty"`
-	Gt  string `json:"gt,omitempty"`
+	Lte interface{} `json:"lte,omitempty"`
+	Lt  interface{} `json:"lt,omitempty"`
+	Gte interface{} `json:"gte,omitempty"`
+	Gt  interface{} `json:"gt,omitempty"`
 }
 
 // FieldStatsResponse is the response body content

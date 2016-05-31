@@ -167,7 +167,7 @@ func TestFieldStatsRequestJson(t *testing.T) {
 		t.Errorf("expected field creation_date, didn't find it!")
 	}
 
-	if constraints.Min.Lt != "" {
+	if constraints.Min.Lt != nil {
 		t.Errorf("expected min value less than constraint to be empty, got %v", constraints.Min.Lt)
 	}
 
