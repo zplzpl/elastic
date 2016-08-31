@@ -106,7 +106,14 @@ func (a *AliasAddAction) Source() (interface{}, error) {
 	case 1:
 		act["index"] = a.index[0]
 	default:
-		act["index"] = a.index
+		act["indices"] = a.index
+	}
+	if a.filter != nil {
+		f, err := a.filter.Source()
+		if err != nil {
+			return nil, err
+		}
+		act["filter"] = f
 	}
 	if len(a.routing) > 0 {
 		act["routing"] = a.routing
@@ -122,22 +129,31 @@ func (a *AliasAddAction) Source() (interface{}, error) {
 
 // AliasRemoveAction is an action to remove an alias.
 type AliasRemoveAction struct {
-	index string // index name(s)
-	alias string // alias name
+	index []string // index name(s)
+	alias string   // alias name
 }
 
 // NewAliasRemoveAction returns an action to remove an alias.
-func NewAliasRemoveAction(alias, index string) *AliasRemoveAction {
+func NewAliasRemoveAction(alias string) *AliasRemoveAction {
 	return &AliasRemoveAction{
 		alias: alias,
-		index: index,
 	}
 }
 
 // Index associates one or more indices to the alias.
-func (a *AliasRemoveAction) Index(index string) *AliasRemoveAction {
-	a.index = index
+func (a *AliasRemoveAction) Index(index ...string) *AliasRemoveAction {
+	a.index = append(a.index, index...)
 	return a
+}
+
+func (a *AliasRemoveAction) removeBlankIndexNames() {
+	var indices []string
+	for _, index := range a.index {
+		if len(index) > 0 {
+			indices = append(indices, index)
+		}
+	}
+	a.index = indices
 }
 
 // Validate checks if the operation is valid.
@@ -157,6 +173,7 @@ func (a *AliasRemoveAction) Validate() error {
 
 // Source returns the JSON-serializable data.
 func (a *AliasRemoveAction) Source() (interface{}, error) {
+	a.removeBlankIndexNames()
 	if err := a.Validate(); err != nil {
 		return nil, err
 	}
@@ -164,7 +181,12 @@ func (a *AliasRemoveAction) Source() (interface{}, error) {
 	act := make(map[string]interface{})
 	src["remove"] = act
 	act["alias"] = a.alias
-	act["index"] = a.index
+	switch len(a.index) {
+	case 1:
+		act["index"] = a.index[0]
+	default:
+		act["indices"] = a.index
+	}
 	return src, nil
 }
 
@@ -209,7 +231,7 @@ func (s *AliasService) AddWithFilter(indexName string, aliasName string, filter 
 
 // Remove removes an alias.
 func (s *AliasService) Remove(indexName string, aliasName string) *AliasService {
-	action := NewAliasRemoveAction(aliasName, indexName)
+	action := NewAliasRemoveAction(aliasName).Index(indexName)
 	s.actions = append(s.actions, action)
 	return s
 }

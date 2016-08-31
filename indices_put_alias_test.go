@@ -124,7 +124,7 @@ func TestAliasAddAction(t *testing.T) {
 		},
 		{
 			Action:   NewAliasAddAction("alias1").Index("index1", "index2"),
-			Expected: `{"add":{"alias":"alias1","index":["index1","index2"]}}`,
+			Expected: `{"add":{"alias":"alias1","indices":["index1","index2"]}}`,
 		},
 		{
 			Action:   NewAliasAddAction("alias1").Index("index1").Routing("routing1"),
@@ -142,6 +142,10 @@ func TestAliasAddAction(t *testing.T) {
 			Action:   NewAliasAddAction("alias1").Index("index1").Routing("routing1").SearchRouting("searchRouting1", "searchRouting2"),
 			Expected: `{"add":{"alias":"alias1","index":"index1","routing":"routing1","search_routing":"searchRouting1,searchRouting2"}}`,
 		},
+		{
+			Action:   NewAliasAddAction("alias1").Index("index1").Filter(NewTermQuery("user", "olivere")),
+			Expected: `{"add":{"alias":"alias1","filter":{"term":{"user":"olivere"}},"index":"index1"}}`,
+		},
 	}
 
 	for i, tt := range tests {
@@ -159,7 +163,7 @@ func TestAliasAddAction(t *testing.T) {
 					t.Fatal(err)
 				}
 				if want, have := tt.Expected, string(dst); want != have {
-					t.Errorf("#%d: expected %q, got %q", want, have)
+					t.Errorf("#%d: expected %s, got %s", i, want, have)
 				}
 			}
 		}
@@ -173,24 +177,24 @@ func TestAliasRemoveAction(t *testing.T) {
 		Invalid  bool
 	}{
 		{
-			Action:  NewAliasRemoveAction("", ""),
+			Action:  NewAliasRemoveAction(""),
 			Invalid: true,
 		},
 		{
-			Action:  NewAliasRemoveAction("alias1", ""),
+			Action:  NewAliasRemoveAction("alias1"),
 			Invalid: true,
 		},
 		{
-			Action:  NewAliasRemoveAction("", "index1"),
+			Action:  NewAliasRemoveAction("").Index("index1"),
 			Invalid: true,
 		},
 		{
-			Action:   NewAliasRemoveAction("alias1", "index1"),
+			Action:   NewAliasRemoveAction("alias1").Index("index1"),
 			Expected: `{"remove":{"alias":"alias1","index":"index1"}}`,
 		},
 		{
-			Action:   NewAliasRemoveAction("alias1", "index1").Index("index2"),
-			Expected: `{"remove":{"alias":"alias1","index":"index2"}}`,
+			Action:   NewAliasRemoveAction("alias1").Index("index1", "index2"),
+			Expected: `{"remove":{"alias":"alias1","indices":["index1","index2"]}}`,
 		},
 	}
 
@@ -209,7 +213,7 @@ func TestAliasRemoveAction(t *testing.T) {
 					t.Fatal(err)
 				}
 				if want, have := tt.Expected, string(dst); want != have {
-					t.Errorf("#%d: expected %q, got %q", want, have)
+					t.Errorf("#%d: expected %s, got %s", i, want, have)
 				}
 			}
 		}
