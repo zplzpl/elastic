@@ -21,6 +21,35 @@ type Backoff interface {
 // Stop is used as a signal to indicate that no more retries should be made.
 const Stop time.Duration = -1
 
+// -- Stop Backoff --
+
+// StopBackOff is a fixed backoff policy that always returns backoff.Stop for
+// NextBackOff(), meaning that the operation should never be retried.
+type StopBackOff struct{}
+
+func NewStopBackoff() *StopBackOff { return &StopBackOff{} }
+
+func (b *StopBackOff) Reset() {}
+
+func (b *StopBackOff) Next() time.Duration { return Stop }
+
+// -- Constant Backoff --
+
+// ConstantBackOff is a backoff policy that always returns the same backoff delay.
+// This is in contrast to an exponential backoff policy,
+// which returns a delay that grows longer as you call Next() over and over again.
+type ConstantBackOff struct {
+	Interval time.Duration
+}
+
+func NewConstantBackOff(d time.Duration) *ConstantBackOff {
+	return &ConstantBackOff{Interval: d}
+}
+
+func (b *ConstantBackOff) Reset() {}
+
+func (b *ConstantBackOff) Next() time.Duration { return b.Interval }
+
 // -- Simple Backoff --
 
 // SimpleBackoff takes a list of fixed values for backoff intervals.

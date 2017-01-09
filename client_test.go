@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/olivere/elastic.v5/backoff"
+
 	"golang.org/x/net/context"
 )
 
@@ -209,7 +211,7 @@ func TestClientSniffDisabled(t *testing.T) {
 
 func TestClientWillMarkConnectionsAsAliveWhenAllAreDead(t *testing.T) {
 	client, err := NewClient(SetURL("http://127.0.0.1:9201"),
-		SetSniff(false), SetHealthcheck(false), SetMaxRetries(0))
+		SetSniff(false), SetHealthcheck(false), SetNoRetry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -892,7 +894,10 @@ func TestPerformRequestRetryOnHttpError(t *testing.T) {
 	tr := &failingTransport{path: "/fail", fail: fail}
 	httpClient := &http.Client{Transport: tr}
 
-	client, err := NewClient(SetHttpClient(httpClient), SetMaxRetries(5), SetHealthcheck(false))
+	retrierFactory := func() Retrier {
+		return NewBackoffRetrier(backoff.NewSimpleBackoff(1000, 1000, 1000, 1000).SendStop(true))
+	}
+	client, err := NewClient(SetHttpClient(httpClient), SetRetrierFactory(retrierFactory), SetHealthcheck(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -922,7 +927,10 @@ func TestPerformRequestNoRetryOnValidButUnsuccessfulHttpStatus(t *testing.T) {
 	tr := &failingTransport{path: "/fail", fail: fail}
 	httpClient := &http.Client{Transport: tr}
 
-	client, err := NewClient(SetHttpClient(httpClient), SetMaxRetries(5), SetHealthcheck(false))
+	retrierFactory := func() Retrier {
+		return NewBackoffRetrier(backoff.NewSimpleBackoff(1000, 1000, 1000, 1000).SendStop(true))
+	}
+	client, err := NewClient(SetHttpClient(httpClient), SetRetrierFactory(retrierFactory), SetHealthcheck(false))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -980,7 +988,7 @@ func TestPerformRequestWithCancel(t *testing.T) {
 	tr := &sleepingTransport{timeout: 3 * time.Second}
 	httpClient := &http.Client{Transport: tr}
 
-	client, err := NewSimpleClient(SetHttpClient(httpClient), SetMaxRetries(0))
+	client, err := NewSimpleClient(SetHttpClient(httpClient), SetNoRetry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1014,7 +1022,7 @@ func TestPerformRequestWithTimeout(t *testing.T) {
 	tr := &sleepingTransport{timeout: 3 * time.Second}
 	httpClient := &http.Client{Transport: tr}
 
-	client, err := NewSimpleClient(SetHttpClient(httpClient), SetMaxRetries(0))
+	client, err := NewSimpleClient(SetHttpClient(httpClient), SetNoRetry())
 	if err != nil {
 		t.Fatal(err)
 	}

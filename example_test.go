@@ -269,14 +269,17 @@ func ExampleClient_NewClient_cluster() {
 func ExampleClient_NewClient_manyOptions() {
 	// Obtain a client for an Elasticsearch cluster of two nodes,
 	// running on 10.0.1.1 and 10.0.1.2. Do not run the sniffer.
-	// Set the healthcheck interval to 10s. When requests fail,
-	// retry 5 times. Print error messages to os.Stderr and informational
+	// Set the healthcheck interval to 10s. When requests fail, retry via
+	// exponential backoff until the maximum of 8 second is reached.
+	// Print error messages to os.Stderr and informational
 	// messages to os.Stdout.
 	client, err := elastic.NewClient(
 		elastic.SetURL("http://10.0.1.1:9200", "http://10.0.1.2:9200"),
 		elastic.SetSniff(false),
 		elastic.SetHealthcheckInterval(10*time.Second),
-		elastic.SetMaxRetries(5),
+		elastic.SetRetrierFactory(func() elastic.Retrier {
+			return elastic.NewExponentialBackoffRetrier(100*time.Millisecond, 8*time.Second)
+		}),
 		elastic.SetErrorLog(log.New(os.Stderr, "ELASTIC ", log.LstdFlags)),
 		elastic.SetInfoLog(log.New(os.Stdout, "", log.LstdFlags)))
 	if err != nil {

@@ -28,7 +28,7 @@ func (d *decoder) Decode(data []byte, v interface{}) error {
 
 func TestDecoder(t *testing.T) {
 	dec := &decoder{}
-	client := setupTestClientAndCreateIndex(t, SetDecoder(dec), SetMaxRetries(0))
+	client := setupTestClientAndCreateIndex(t, SetDecoder(dec), SetNoRetry())
 
 	tweet := tweet{User: "olivere", Message: "Welcome to Golang and Elasticsearch."}
 
