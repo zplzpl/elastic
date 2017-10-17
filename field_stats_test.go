@@ -172,7 +172,7 @@ func TestFieldStatsRequestDeserialize(t *testing.T) {
 	}`
 
 	var request FieldStatsRequest
-	if err := json.Unmarshal([]byte(body), &request); err != nil {
+	if err := jsonIterator.Unmarshal([]byte(body), &request); err != nil {
 		t.Errorf("unexpected error during unmarshalling: %v", err)
 	}
 
@@ -241,7 +241,7 @@ func TestFieldStatsResponseUnmarshalling(t *testing.T) {
 	}`
 
 	var response FieldStatsResponse
-	if err := json.Unmarshal([]byte(clusterStats), &response); err != nil {
+	if err := jsonIterator.Unmarshal([]byte(clusterStats), &response); err != nil {
 		t.Errorf("unexpected error during unmarshalling: %v", err)
 	}
 

@@ -62,7 +62,7 @@ func TestIndexLifecycle(t *testing.T) {
 
 	// Decode the Source field
 	var tweetGot tweet
-	err = json.Unmarshal(*getResult.Source, &tweetGot)
+	err = jsonIterator.Unmarshal(*getResult.Source, &tweetGot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestIndexLifecycleWithAutomaticIDGeneration(t *testing.T) {
 
 	// Decode the Source field
 	var tweetGot tweet
-	err = json.Unmarshal(*getResult.Source, &tweetGot)
+	err = jsonIterator.Unmarshal(*getResult.Source, &tweetGot)
 	if err != nil {
 		t.Fatal(err)
 	}

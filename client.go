@@ -20,8 +20,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-
-	"gopkg.in/olivere/elastic.v5/config"
+	"github.com/zplzpl/elastic/config"
+	"github.com/json-iterator/go"
 )
 
 const (
@@ -97,6 +97,8 @@ var (
 
 	// noRetries is a retrier that does not retry.
 	noRetries = NewStopRetrier()
+
+    jsonIterator = jsoniter.ConfigCompatibleWithStandardLibrary
 )
 
 // ClientOptionFunc is a function that configures a Client.

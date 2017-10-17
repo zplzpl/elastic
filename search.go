@@ -25,6 +25,7 @@ type SearchService struct {
 	searchType        string
 	index             []string
 	typ               []string
+	template			string
 	routing           string
 	preference        string
 	requestCache      *bool
@@ -76,6 +77,12 @@ func (s *SearchService) Index(index ...string) *SearchService {
 func (s *SearchService) Type(typ ...string) *SearchService {
 	s.typ = append(s.typ, typ...)
 	return s
+}
+
+//set search template
+func (s *SearchService) Template(tpl string) *SearchService{
+		s.template = tpl
+		return s
 }
 
 // Pretty enables the caller to indent the JSON output.
@@ -324,6 +331,10 @@ func (s *SearchService) buildURL() (string, url.Values, error) {
 		return "", url.Values{}, err
 	}
 
+	if s.template != ""{
+			path = path + "/template"
+		}
+
 	// Add query string parameters
 	params := url.Values{}
 	if s.pretty {
@@ -430,7 +441,7 @@ func (r *SearchResult) Each(typ reflect.Type) []interface{} {
 	var slice []interface{}
 	for _, hit := range r.Hits.Hits {
 		v := reflect.New(typ).Elem()
-		if err := json.Unmarshal(*hit.Source, v.Addr().Interface()); err == nil {
+		if err := jsonIterator.Unmarshal(*hit.Source, v.Addr().Interface()); err == nil {
 			slice = append(slice, v.Interface())
 		}
 	}

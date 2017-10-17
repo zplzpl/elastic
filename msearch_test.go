@@ -88,7 +88,7 @@ func TestMultiSearch(t *testing.T) {
 			t.Errorf("expected Hits.Hit.Index = %q; got %q", testIndexName, hit.Index)
 		}
 		item := make(map[string]interface{})
-		err := json.Unmarshal(*hit.Source, &item)
+		err := jsonIterator.Unmarshal(*hit.Source, &item)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,7 +109,7 @@ func TestMultiSearch(t *testing.T) {
 			t.Errorf("expected Hits.Hit.Index = %q; got %q", testIndexName, hit.Index)
 		}
 		item := make(map[string]interface{})
-		err := json.Unmarshal(*hit.Source, &item)
+		err := jsonIterator.Unmarshal(*hit.Source, &item)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +190,7 @@ func TestMultiSearchWithOneRequest(t *testing.T) {
 			t.Errorf("expected Hits.Hit.Index = %q; got %q", testIndexName, hit.Index)
 		}
 		item := make(map[string]interface{})
-		err := json.Unmarshal(*hit.Source, &item)
+		err := jsonIterator.Unmarshal(*hit.Source, &item)
 		if err != nil {
 			t.Fatal(err)
 		}

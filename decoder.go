@@ -4,9 +4,6 @@
 
 package elastic
 
-import (
-	"encoding/json"
-)
 
 // Decoder is used to decode responses from Elasticsearch.
 // Users of elastic can implement their own marshaler for advanced purposes
@@ -22,5 +19,5 @@ type DefaultDecoder struct{}
 
 // Decode decodes with json.Unmarshal from the Go standard library.
 func (u *DefaultDecoder) Decode(data []byte, v interface{}) error {
-	return json.Unmarshal(data, v)
+	return jsonIterator.Unmarshal(data, v)
 }

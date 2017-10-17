@@ -882,7 +882,7 @@ func TestPerformRequest(t *testing.T) {
 	}
 
 	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
+	if err := jsonIterator.Unmarshal(res.Body, ret); err != nil {
 		t.Fatalf("expected no error on decode; got: %v", err)
 	}
 	if ret.ClusterName == "" {
@@ -904,7 +904,7 @@ func TestPerformRequestWithSimpleClient(t *testing.T) {
 	}
 
 	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
+	if err := jsonIterator.Unmarshal(res.Body, ret); err != nil {
 		t.Fatalf("expected no error on decode; got: %v", err)
 	}
 	if ret.ClusterName == "" {
@@ -930,7 +930,7 @@ func TestPerformRequestWithLogger(t *testing.T) {
 	}
 
 	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
+	if err := jsonIterator.Unmarshal(res.Body, ret); err != nil {
 		t.Fatalf("expected no error on decode; got: %v", err)
 	}
 	if ret.ClusterName == "" {
@@ -969,7 +969,7 @@ func TestPerformRequestWithLoggerAndTracer(t *testing.T) {
 	}
 
 	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
+	if err := jsonIterator.Unmarshal(res.Body, ret); err != nil {
 		t.Fatalf("expected no error on decode; got: %v", err)
 	}
 	if ret.ClusterName == "" {
@@ -1028,7 +1028,7 @@ func TestPerformRequestWithCustomLogger(t *testing.T) {
 	}
 
 	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
+	if err := jsonIterator.Unmarshal(res.Body, ret); err != nil {
 		t.Fatalf("expected no error on decode; got: %v", err)
 	}
 	if ret.ClusterName == "" {
@@ -1270,7 +1270,7 @@ func testPerformRequestWithCompression(t *testing.T, hc *http.Client) {
 	}
 
 	ret := new(PingResult)
-	if err := json.Unmarshal(res.Body, ret); err != nil {
+	if err := jsonIterator.Unmarshal(res.Body, ret); err != nil {
 		t.Fatalf("expected no error on decode; got: %v", err)
 	}
 	if ret.ClusterName == "" {
