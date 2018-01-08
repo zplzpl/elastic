@@ -25,7 +25,7 @@ type SearchService struct {
 	searchType        string
 	index             []string
 	typ               []string
-	template			string
+	template          string
 	routing           string
 	preference        string
 	requestCache      *bool
@@ -80,9 +80,9 @@ func (s *SearchService) Type(typ ...string) *SearchService {
 }
 
 //set search template
-func (s *SearchService) Template(tpl string) *SearchService{
-		s.template = tpl
-		return s
+func (s *SearchService) Template(tpl string) *SearchService {
+	s.template = tpl
+	return s
 }
 
 // Pretty enables the caller to indent the JSON output.
@@ -331,9 +331,9 @@ func (s *SearchService) buildURL() (string, url.Values, error) {
 		return "", url.Values{}, err
 	}
 
-	if s.template != ""{
-			path = path + "/template"
-		}
+	if s.template != "" {
+		path = path + "/template"
+	}
 
 	// Add query string parameters
 	params := url.Values{}
@@ -374,6 +374,7 @@ func (s *SearchService) Validate() error {
 
 // Do executes the search and returns a SearchResult.
 func (s *SearchService) Do(ctx context.Context) (*SearchResult, error) {
+
 	// Check pre-conditions
 	if err := s.Validate(); err != nil {
 		return nil, err
@@ -403,7 +404,7 @@ func (s *SearchService) Do(ctx context.Context) (*SearchResult, error) {
 
 	// Return search results
 	ret := new(SearchResult)
-	if err := s.client.decoder.Decode(res.Body, ret); err != nil {
+	if err := ret.UnmarshalJSON(res.Body); err != nil {
 		return nil, err
 	}
 	return ret, nil
@@ -411,15 +412,15 @@ func (s *SearchService) Do(ctx context.Context) (*SearchResult, error) {
 
 // SearchResult is the result of a search in Elasticsearch.
 type SearchResult struct {
-	TookInMillis int64          `json:"took"`              // search time in milliseconds
-	ScrollId     string         `json:"_scroll_id"`        // only used with Scroll and Scan operations
-	Hits         *SearchHits    `json:"hits"`              // the actual search hits
-	Suggest      SearchSuggest  `json:"suggest"`           // results from suggesters
-	Aggregations Aggregations   `json:"aggregations"`      // results from aggregations
-	TimedOut     bool           `json:"timed_out"`         // true if the search timed out
-	Error        *ErrorDetails  `json:"error,omitempty"`   // only used in MultiGet
-	Profile      *SearchProfile `json:"profile,omitempty"` // profiling results, if optional Profile API was active for this search
-	Shards       *shardsInfo    `json:"_shards,omitempty"` // shard information
+	TookInMillis int64            `json:"took"`              // search time in milliseconds
+	ScrollId     string           `json:"_scroll_id"`        // only used with Scroll and Scan operations
+	Hits         *SearchHits      `json:"hits"`              // the actual search hits
+	Suggest      SearchSuggest    `json:"suggest"`           // results from suggesters
+	Aggregations *json.RawMessage `json:"aggregations"`      // results from aggregations
+	TimedOut     bool             `json:"timed_out"`         // true if the search timed out
+	Error        *ErrorDetails    `json:"error,omitempty"`   // only used in MultiGet
+	Profile      *SearchProfile   `json:"profile,omitempty"` // profiling results, if optional Profile API was active for this search
+	Shards       *shardsInfo      `json:"_shards,omitempty"` // shard information
 }
 
 // TotalHits is a convenience function to return the number of hits for

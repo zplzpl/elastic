@@ -22,6 +22,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/zplzpl/elastic/config"
 	"github.com/json-iterator/go"
+	"github.com/opentracing/opentracing-go"
+	"github.com/opentracing/opentracing-go/ext"
 )
 
 const (
@@ -98,7 +100,7 @@ var (
 	// noRetries is a retrier that does not retry.
 	noRetries = NewStopRetrier()
 
-    jsonIterator = jsoniter.ConfigCompatibleWithStandardLibrary
+	jsonIterator = jsoniter.ConfigCompatibleWithStandardLibrary
 )
 
 // ClientOptionFunc is a function that configures a Client.
@@ -1181,8 +1183,8 @@ func (c *Client) PerformRequest(ctx context.Context, method, path string, params
 // Optionally, a list of HTTP error codes to ignore can be passed.
 // This is necessary for services that expect e.g. HTTP status 404 as a
 // valid outcome (Exists, IndicesExists, IndicesTypeExists).
-func (c *Client) PerformRequestWithContentType(ctx context.Context, method, path string, params url.Values, body interface{}, contentType string, ignoreErrors ...int) (*Response, error) {
-	start := time.Now().UTC()
+func (c *Client) PerformRequestWithContentType(ctx context.Context, method, path string, params url.Values, body interface{}, contentType string, ignoreErrors ...int) (resp *Response, err error) {
+	//start := time.Now().UTC()
 
 	c.mu.RLock()
 	timeout := c.healthcheckTimeout
@@ -1193,23 +1195,44 @@ func (c *Client) PerformRequestWithContentType(ctx context.Context, method, path
 	gzipEnabled := c.gzipEnabled
 	c.mu.RUnlock()
 
-	var err error
+	//var err error
 	var conn *conn
 	var req *Request
-	var resp *Response
+	//var resp *Response
 	var retried bool
 	var n int
+
+	parentSpan := opentracing.SpanFromContext(ctx)
+	var span opentracing.Span
+	if parentSpan != nil {
+		span = opentracing.StartSpan("ElasticSearchClient", opentracing.ChildOf(parentSpan.Context()))
+		defer func() {
+			if err != nil {
+				span.LogKV("error", err.Error())
+				span.SetTag("error", true)
+			}
+			span.Finish()
+		}()
+	}
 
 	// Change method if sendGetBodyAs is specified.
 	if method == "GET" && body != nil && sendGetBodyAs != "GET" {
 		method = sendGetBodyAs
 	}
 
+	pathWithParams := path
+	if len(params) > 0 {
+		pathWithParams += "?" + params.Encode()
+	}
+
+	// Tracing
+	if span != nil {
+		ext.HTTPMethod.Set(span, method)
+		ext.HTTPUrl.Set(span, pathWithParams)
+		span.LogKV("body", body)
+	}
+
 	for {
-		pathWithParams := path
-		if len(params) > 0 {
-			pathWithParams += "?" + params.Encode()
-		}
 
 		// Get a connection
 		conn, err = c.next()
@@ -1235,9 +1258,11 @@ func (c *Client) PerformRequestWithContentType(ctx context.Context, method, path
 			return nil, err
 		}
 
-		req, err = NewRequest(method, conn.URL()+pathWithParams)
+		urlValue := conn.URL() + pathWithParams
+
+		req, err = NewRequest(method, urlValue)
 		if err != nil {
-			c.errorf("elastic: cannot create request for %s %s: %v", strings.ToUpper(method), conn.URL()+pathWithParams, err)
+			c.errorf("elastic: cannot create request for %s %s: %v", strings.ToUpper(method), urlValue, err)
 			return nil, err
 		}
 
@@ -1256,9 +1281,6 @@ func (c *Client) PerformRequestWithContentType(ctx context.Context, method, path
 				return nil, err
 			}
 		}
-
-		// Tracing
-		c.dumpRequest((*http.Request)(req))
 
 		// Get response
 		res, err := c.c.Do((*http.Request)(req).WithContext(ctx))
@@ -1316,12 +1338,12 @@ func (c *Client) PerformRequestWithContentType(ctx context.Context, method, path
 		break
 	}
 
-	duration := time.Now().UTC().Sub(start)
-	c.infof("%s %s [status:%d, request:%.3fs]",
-		strings.ToUpper(method),
-		req.URL,
-		resp.StatusCode,
-		float64(int64(duration/time.Millisecond))/1000)
+	//duration := time.Now().UTC().Sub(start)
+	//c.infof("%s %s [status:%d, request:%.3fs]",
+	//	strings.ToUpper(method),
+	//	req.URL,
+	//	resp.StatusCode,
+	//	float64(int64(duration/time.Millisecond))/1000)
 
 	return resp, nil
 }
