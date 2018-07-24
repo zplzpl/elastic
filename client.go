@@ -1202,8 +1202,11 @@ func (c *Client) PerformRequestWithContentType(ctx context.Context, method, path
 	var retried bool
 	var n int
 
-	parentSpan := opentracing.SpanFromContext(ctx)
-	var span opentracing.Span
+	var parentSpan, span opentracing.Span
+	if ctx != nil {
+		parentSpan = opentracing.SpanFromContext(ctx)
+	}
+
 	if parentSpan != nil {
 		span = opentracing.StartSpan("ElasticSearchClient", opentracing.ChildOf(parentSpan.Context()))
 		defer func() {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"gopkg.in/olivere/elastic.v5/uritemplates"
+	"github.com/zplzpl/elastic/uritemplates"
 )
 
 const (

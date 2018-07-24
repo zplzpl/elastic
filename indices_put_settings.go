@@ -10,7 +10,7 @@ import (
 	"net/url"
 	"strings"
 
-	"gopkg.in/olivere/elastic.v5/uritemplates"
+	"github.com/zplzpl/elastic/uritemplates"
 )
 
 // IndicesPutSettingsService changes specific index level settings in

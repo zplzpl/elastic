@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net/url"
 
-	"gopkg.in/olivere/elastic.v5/uritemplates"
+	"github.com/zplzpl/elastic/uritemplates"
 )
 
 // IndicesCloseService closes an index.
